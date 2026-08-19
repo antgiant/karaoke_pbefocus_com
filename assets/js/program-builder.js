@@ -50,6 +50,19 @@ export function buildProgram(manifest, mix, selectedKeys) {
       const outTime = slice[slice.length - 1].end;
       const words = recording.words.filter((w) => w.start >= inTime && w.end <= outTime);
 
+      // Word object -> canonical index, computed once here from the FULL
+      // recording (not the `words` slice above) -- position-within-verse
+      // has to be counted across the whole take, not reset at wherever this
+      // run happens to start/end, or a run beginning or ending mid-verse
+      // gets every word after that point mapped to the wrong canonical
+      // index. The display layer (word-stream.js) reuses this directly
+      // instead of re-deriving it from a slice, which is exactly the bug
+      // that caused it to.
+      const canonicalIndexMap = new Map();
+      aligned.forEach((w, ci) => {
+        if (w) canonicalIndexMap.set(w, ci);
+      });
+
       blocks.push({
         sectionKey: key,
         label: multiPart ? `${label} (part ${runIndex + 1}/${runs.length})` : label,
@@ -59,6 +72,7 @@ export function buildProgram(manifest, mix, selectedKeys) {
         inTime,
         outTime,
         words,
+        canonicalIndexMap,
       });
     });
   }
@@ -68,4 +82,27 @@ export function buildProgram(manifest, mix, selectedKeys) {
 
 export function totalDuration(program) {
   return program.blocks.reduce((sum, b) => sum + (b.outTime - b.inTime), 0);
+}
+
+/**
+ * Shuffles section order (not word/block order within a section -- a mixed
+ * section's runs still play in their own sequence, since that's the actual
+ * scripture text order). Groups consecutive same-sectionKey blocks (that's
+ * always how buildProgram emits them) and Fisher-Yates shuffles the groups.
+ */
+export function shuffleBySection(program) {
+  const groups = [];
+  let current = null;
+  for (const block of program.blocks) {
+    if (!current || current.sectionKey !== block.sectionKey) {
+      current = { sectionKey: block.sectionKey, blocks: [] };
+      groups.push(current);
+    }
+    current.blocks.push(block);
+  }
+  for (let i = groups.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [groups[i], groups[j]] = [groups[j], groups[i]];
+  }
+  return { blocks: groups.flatMap((g) => g.blocks), fallbacks: program.fallbacks };
 }

@@ -10,9 +10,10 @@
  * onto the shared engine's per-frame tick loop would fight its own
  * auto-advance logic. Takes the program directly instead of an engine.
  */
+import { seekReliably } from "../playback-engine.js";
 import { maskedText } from "./masking.js";
 
-export function mountTypeAhead(container, program) {
+export function mountTypeAhead(container, program, getLengthMatched = () => false) {
   container.innerHTML = "";
   container.className = "typeahead-view";
 
@@ -36,13 +37,26 @@ export function mountTypeAhead(container, program) {
   const feedback = document.createElement("span");
   feedback.className = "typeahead-feedback";
   form.append(input, submitBtn, feedback);
-  container.append(heading, stream, form);
+  const scoreEl = document.createElement("p");
+  scoreEl.className = "singalong-score";
+  container.append(heading, scoreEl, stream, form);
 
   const audio = new Audio();
   let wordEls = [];
   let words = [];
   let revealed = new Set();
   let cancelled = false;
+  let correctFirstTry = 0;
+  let totalGated = 0;
+
+  function updateScoreDisplay() {
+    if (totalGated === 0) {
+      scoreEl.textContent = "";
+      return;
+    }
+    const pct = Math.round((correctFirstTry / totalGated) * 100);
+    scoreEl.textContent = `Score: ${correctFirstTry}/${totalGated} words correct on the first try (${pct}%)`;
+  }
 
   // Attached once, for the form's whole lifetime -- guarantees a native
   // submit (page navigation, losing all state) can never slip through in
@@ -62,15 +76,35 @@ export function mountTypeAhead(container, program) {
     heading.textContent = block ? block.label : "";
     words = block ? block.words : [];
     revealed = new Set();
-    // Scripture words stay masked until reached -- otherwise the answer is
-    // just sitting on the page, defeating the point of typing it from memory.
+
+    // Grouped into verse lines with verse-number markers, like the other
+    // study modes -- scripture words stay masked until reached (otherwise
+    // the answer is just sitting on the page, defeating the point of typing
+    // it from memory); filler stays inline with whichever verse it trails.
+    let verseEl = null;
+    let openVerse;
     wordEls = words.map((w) => {
+      if (w.verse !== null && w.verse !== openVerse) {
+        openVerse = w.verse;
+        verseEl = document.createElement("p");
+        verseEl.className = "karaoke-verse";
+        const num = document.createElement("sup");
+        num.className = "verse-num";
+        num.textContent = String(openVerse);
+        verseEl.appendChild(num);
+        stream.appendChild(verseEl);
+      } else if (verseEl === null) {
+        verseEl = document.createElement("p");
+        verseEl.className = "karaoke-verse karaoke-verse-intro";
+        stream.appendChild(verseEl);
+      }
+
       const span = document.createElement("span");
       const masked = w.verse !== null;
       span.className = "karaoke-word" + (w.verse === null ? " filler" : "") + (masked ? " blanked" : "");
-      span.textContent = masked ? `${maskedText(w.word)} ` : `${w.word} `;
+      span.textContent = masked ? `${maskedText(w.word, getLengthMatched())} ` : `${w.word} `;
       span.dataset.word = w.word;
-      stream.appendChild(span);
+      verseEl.appendChild(span);
       return span;
     });
   }
@@ -125,6 +159,7 @@ export function mountTypeAhead(container, program) {
       feedback.textContent = "";
       feedback.className = "typeahead-feedback";
       input.focus();
+      let wrongAttempts = 0;
 
       onSubmitAttempt = () => {
         if (cancelled) {
@@ -136,8 +171,12 @@ export function mountTypeAhead(container, program) {
           onSubmitAttempt = null;
           input.disabled = true;
           feedback.textContent = "";
+          totalGated += 1;
+          if (wrongAttempts === 0) correctFirstTry += 1;
+          updateScoreDisplay();
           resolve();
         } else {
+          wrongAttempts += 1;
           feedback.textContent = "Try again";
           feedback.className = "typeahead-feedback error";
           input.value = "";
@@ -169,7 +208,8 @@ export function mountTypeAhead(container, program) {
     renderWords(block);
     await loadMetadata(block.audioUrl);
     if (cancelled) return;
-    audio.currentTime = block.inTime;
+    await seekReliably(audio, block.inTime);
+    if (cancelled) return;
 
     const scriptureIndices = words.map((w, i) => (w.verse !== null ? i : -1)).filter((i) => i >= 0);
 

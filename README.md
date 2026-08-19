@@ -35,11 +35,32 @@ its output never belong in this public repo (see `.gitignore`).
 
 ## Run Locally
 
+**Use a server that supports HTTP Range requests -- this genuinely matters,
+not just for speed.** Seeking an `<audio>` element to any position beyond
+what's already sequentially buffered requires the browser to ask the server
+for a specific byte range; without that, the browser can't jump ahead at
+all (`audio.seekable` never extends past the start), so anything past the
+very first few seconds of a track becomes unreachable -- playback, the
+karaoke highlight, and click-to-seek all silently break as soon as a study
+session needs to start mid-file (which is the normal case, not an edge
+case). Plain `python3 -m http.server` does **not** support Range requests
+(confirmed against Python 3.14) and should not be used for this app.
+
 ```bash
-python3 -m http.server 8000
+npx http-server -p 8000 -c-1
 ```
 
-Then open `http://localhost:8000/?library=<your manifest URL>`.
+(`http-server` supports Range out of the box; `-c-1` disables caching, handy
+while iterating.) Then open `http://localhost:8000/?library=<your manifest
+URL>`. Any other local server with real Range support works too -- check
+with `curl -I -r 0-100 <url-to-an-mp3>` and confirm you get back
+`206 Partial Content` with an `Accept-Ranges: bytes` header, not `200 OK`.
+
+The same requirement applies to wherever you end up hosting the real
+content for production: virtually every static host (GitHub Pages, S3,
+Cloudflare R2/Pages, Netlify, Backblaze B2, a plain nginx/Apache) supports
+Range by default, so this is unlikely to bite you there -- it's specifically
+ad-hoc dev servers like Python's that tend not to.
 
 There's no sample manifest checked in (it would contain the private song
 content) -- generate one from your own copy of the library with

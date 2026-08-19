@@ -2,11 +2,19 @@ import { colorForStyle } from "./constants.js";
 import { canonicalWords, orderedSections, passageLabel, sectionKey } from "./library.js";
 import { paintRange } from "./mix.js";
 
+// Sections start expanded (immediately usable for painting); this tracks
+// which ones the Pathfinder has explicitly collapsed, persisted across
+// remounts (main.js unmounts/remounts this editor on every selection
+// change) so collapsing one while you keep painting doesn't re-expand it.
+const collapsedSections = new Set();
+
 /**
- * The genre "paint" UI: one word-chip strip per selected section, a style
- * palette above it. Pick a style, then either tap a single word or drag
- * across a range to paint it -- built on Pointer Events (not the HTML5
- * Drag-and-Drop API) so the exact same code path drives mouse and touch.
+ * The genre "paint" UI: one word-chip strip per selected section (verse
+ * numbers, chapter title, each verse its own line -- same Bible-style
+ * layout as the study/playback views), a style palette above it. Pick a
+ * style, then either tap a single word or drag across a range to paint it
+ * -- built on Pointer Events (not the HTML5 Drag-and-Drop API) so the exact
+ * same code path drives mouse and touch.
  *
  * Touch note: chips call releasePointerCapture on pointerdown to opt out of
  * the browser's implicit touch capture, which otherwise pins all pointer
@@ -60,18 +68,38 @@ export function mountMixEditor(container, manifest, mix, selectedKeys, onChange)
     const canonical = canonicalWords(section);
     const assignment = mix.sections.get(key);
 
-    const wrap = document.createElement("div");
+    const wrap = document.createElement("details");
     wrap.className = "mix-section";
-    const heading = document.createElement("p");
-    heading.className = "mix-section-heading";
-    heading.textContent = passageLabel(section);
-    wrap.appendChild(heading);
+    wrap.open = !collapsedSections.has(key);
+    wrap.addEventListener("toggle", () => {
+      if (wrap.open) collapsedSections.delete(key);
+      else collapsedSections.add(key);
+    });
+
+    const summary = document.createElement("summary");
+    summary.className = "mix-section-heading";
+    summary.textContent = passageLabel(section);
+    wrap.appendChild(summary);
 
     const strip = document.createElement("div");
     strip.className = "word-strip";
     wrap.appendChild(strip);
 
-    const chips = canonical.map((w, i) => {
+    const chips = [];
+    let verseLine = null;
+    let openVerse;
+    canonical.forEach((w, i) => {
+      if (verseLine === null || w.verse !== openVerse) {
+        openVerse = w.verse;
+        verseLine = document.createElement("div");
+        verseLine.className = "mix-verse-line";
+        const num = document.createElement("sup");
+        num.className = "verse-num";
+        num.textContent = String(openVerse);
+        verseLine.appendChild(num);
+        strip.appendChild(verseLine);
+      }
+
       const chip = document.createElement("span");
       chip.className = "word-chip";
       chip.textContent = w.word;
@@ -96,8 +124,8 @@ export function mountMixEditor(container, manifest, mix, selectedKeys, onChange)
           paintPreview();
         }
       });
-      strip.appendChild(chip);
-      return chip;
+      verseLine.appendChild(chip);
+      chips.push(chip);
     });
 
     function paintPreview() {

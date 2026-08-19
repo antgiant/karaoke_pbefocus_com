@@ -1,30 +1,19 @@
-import { wordIndexAtTime } from "../playback-engine.js";
-import { createWordStream } from "./word-stream.js";
+import { createPassageView } from "./word-stream.js";
 
-/** Words vanish immediately after being sung, instead of just dimming -- only upcoming text stays readable. */
-export function mountDisappearingWord(container, engine) {
-  const stream = createWordStream(container);
-  let currentBlock = null;
-
-  function renderBlock(block) {
-    currentBlock = block;
-    stream.renderBlock(block, (w) => ({ text: w.word }));
-  }
-
-  const unsubscribers = [
-    engine.on("blockchange", (block) => renderBlock(block)),
-    engine.on("timeupdate", (t, block) => {
-      if (block !== currentBlock) renderBlock(block);
-      stream.highlight(wordIndexAtTime(block.words, t), {
-        onPastWord: (el, isPast) => el.classList.toggle("gone", isPast),
-      });
-    }),
-  ];
-
-  const initial = engine.getState();
-  if (initial.block) renderBlock(initial.block);
-
-  return function unmount() {
-    for (const off of unsubscribers) off();
-  };
+/**
+ * Words vanish instead of just dimming. getLookahead() controls how far
+ * ahead of the actual playback position the vanish boundary sits: 0 (the
+ * default) hides only words already sung -- the currently-playing word
+ * stays visible until it finishes. 1 hides the currently-playing word too,
+ * as soon as it starts. 2 also hides the next upcoming word, etc. -- each
+ * step forces recall one word further ahead of the audio.
+ */
+export function mountDisappearingWord(container, engine, manifest, mix, getLookahead = () => 0) {
+  const view = createPassageView(container, engine, manifest, mix);
+  view.setRenderWord((w) => ({ text: w.word }));
+  view.setOnPastWord((el, isPast, i, word, activeIndex) => {
+    const gone = activeIndex >= 0 && i < activeIndex + getLookahead();
+    el.classList.toggle("gone", gone);
+  });
+  return view.unmount;
 }

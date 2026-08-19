@@ -51,8 +51,8 @@
       </section>
 
       <div id="appPanel" hidden>
-        <section class="panel">
-          <h2>Choose Chapters &amp; Verses</h2>
+        <details class="panel" id="selectionPanel" open>
+          <summary class="panel-summary"><h2>Choose Chapters &amp; Verses</h2></summary>
           <div class="selection-toolbar">
             <button id="selectAllBtn" type="button" class="btn secondary">Select All</button>
             <button id="selectNoneBtn" type="button" class="btn secondary">Clear</button>
@@ -68,7 +68,7 @@
         <section class="panel">
           <h2>Study</h2>
           <div class="style-select-row">
-            <label for="styleSelect">Musical style</label>
+            <label for="styleSelect">Default Musical Style</label>
             <select id="styleSelect"></select>
             <button id="toggleMixEditorBtn" type="button" class="btn secondary">Customize Genre Mix</button>
           </div>
@@ -83,12 +83,21 @@
               <option value="typeahead">Type Ahead</option>
               <option value="singalong">Sing-Along (Scored)</option>
             </select>
-            <label for="hintLevelSelect" id="hintLevelLabel" hidden>Hint level</label>
-            <select id="hintLevelSelect" hidden>
-              <option value="0">None</option>
-              <option value="0.15" selected>Some</option>
-              <option value="0.4">Most</option>
+            <label for="hintLevelInput" id="hintLevelLabel" hidden>Hint level (%)</label>
+            <input type="number" id="hintLevelInput" min="0" max="100" step="5" value="15" hidden />
+            <span id="hintLevelPercentSign" hidden>%</span>
+            <label for="lookaheadSelect" id="lookaheadLabel" hidden>Vanish</label>
+            <select id="lookaheadSelect" hidden>
+              <option value="0" selected>As sung (default)</option>
+              <option value="1">Current word too</option>
+              <option value="2">1 word ahead</option>
+              <option value="3">2 words ahead</option>
+              <option value="4">3 words ahead</option>
             </select>
+            <label class="inline-checkbox" id="lengthMatchedRow" hidden>
+              <input type="checkbox" id="lengthMatchedCheckbox" />
+              Blank length matches word length
+            </label>
             <button id="startKaraokeBtn" type="button" class="btn">Start Studying</button>
             <button id="sleepModeBtn" type="button" class="btn secondary">🌙 Sleep Mode</button>
           </div>

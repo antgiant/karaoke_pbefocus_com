@@ -1,28 +1,8 @@
-import { wordIndexAtTime } from "../playback-engine.js";
-import { createWordStream } from "./word-stream.js";
+import { createPassageView } from "./word-stream.js";
 
 /** Standard karaoke: highlight the current word, dim ones already sung. */
-export function mountKaraoke(container, engine) {
-  const stream = createWordStream(container);
-  let currentBlock = null;
-
-  function renderBlock(block) {
-    currentBlock = block;
-    stream.renderBlock(block, (w) => ({ text: w.word }));
-  }
-
-  const unsubscribers = [
-    engine.on("blockchange", (block) => renderBlock(block)),
-    engine.on("timeupdate", (t, block) => {
-      if (block !== currentBlock) renderBlock(block);
-      stream.highlight(wordIndexAtTime(block.words, t));
-    }),
-  ];
-
-  const initial = engine.getState();
-  if (initial.block) renderBlock(initial.block);
-
-  return function unmount() {
-    for (const off of unsubscribers) off();
-  };
+export function mountKaraoke(container, engine, manifest, mix) {
+  const view = createPassageView(container, engine, manifest, mix);
+  view.setRenderWord((w) => ({ text: w.word }));
+  return view.unmount;
 }

@@ -1,3 +1,4 @@
+import { shuffleBySection } from "./program-builder.js";
 import { mountKaraoke } from "./study-modes/karaoke.js";
 import { mountPlayerControls } from "./player-controls.js";
 
@@ -19,7 +20,7 @@ const FADE_SECONDS = 8;
  * MediaSession (lock-screen controls, so playback survives a locked
  * screen) on top. Returns an exit() function that tears everything down.
  */
-export function mountSleepMode(engine, program, { styleLabelFor = (id) => id } = {}) {
+export function mountSleepMode(engine, program, manifest, mix, { styleLabelFor = (id) => id } = {}) {
   const overlay = document.createElement("div");
   overlay.className = "sleep-overlay";
 
@@ -35,11 +36,17 @@ export function mountSleepMode(engine, program, { styleLabelFor = (id) => id } =
     option.textContent = opt.label;
     timerSelect.appendChild(option);
   }
+  const shuffleLabel = document.createElement("label");
+  shuffleLabel.className = "sleep-shuffle-toggle";
+  const shuffleCheckbox = document.createElement("input");
+  shuffleCheckbox.type = "checkbox";
+  shuffleLabel.append(shuffleCheckbox, document.createTextNode(" 🔀 Shuffle"));
+
   const exitBtn = document.createElement("button");
   exitBtn.type = "button";
   exitBtn.className = "btn secondary";
   exitBtn.textContent = "Exit Sleep Mode";
-  topbar.append(timerLabel, timerSelect, exitBtn);
+  topbar.append(timerLabel, timerSelect, shuffleLabel, exitBtn);
 
   const karaokeContainer = document.createElement("div");
   const controlsContainer = document.createElement("div");
@@ -110,13 +117,34 @@ export function mountSleepMode(engine, program, { styleLabelFor = (id) => id } =
     };
   }
 
+  function loadAndPlay() {
+    engine.loadProgram(shuffleCheckbox.checked ? shuffleBySection(program) : program);
+    engine.play();
+  }
+
+  // loadProgram (not play) before mounting: mountPlayerControls has no
+  // initial-state fallback, only live event subscriptions, so calling
+  // play() before it's mounted would fire the first "playstate" event into
+  // nobody and leave the Play/Pause button stuck showing "Play" while
+  // actually playing.
   engine.loadProgram(program);
-  const unmountKaraoke = mountKaraoke(karaokeContainer, engine);
+  const unmountKaraoke = mountKaraoke(karaokeContainer, engine, manifest, mix);
   const unmountControls = mountPlayerControls(controlsContainer, engine, { styleLabelFor });
   engine.play();
 
+  shuffleCheckbox.addEventListener("change", loadAndPlay);
+
+  // Sleep mode loops the selection by default -- it's meant to play through
+  // to fall asleep to, not stop partway through the night. Re-shuffles each
+  // lap if shuffle is on, so it's not the same order all night. The sleep
+  // timer's fade-out still ends things on schedule (that calls pause(), not
+  // something that fires "ended", so it doesn't fight this).
+  const offEnded = engine.on("ended", loadAndPlay);
+
   function exit() {
     clearTimers();
+    offEnded();
+    engine.pause();
     engine.setMasterVolume(1);
     unmountKaraoke();
     unmountControls();

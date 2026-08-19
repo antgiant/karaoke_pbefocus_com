@@ -22,6 +22,61 @@ export function wordIndexAtTime(words, t) {
   return result;
 }
 
+/**
+ * Seeks an <audio> element to `time` and resolves once it's actually landed
+ * there -- NOT the same as resolving right after assigning `.currentTime`.
+ * On a server without Range support (seeking requires the browser to have
+ * already buffered up to that point, since it can't request a byte range),
+ * assigning currentTime before enough data has downloaded is silently
+ * ignored -- it just reverts to wherever it already was instead of
+ * throwing or rejecting, so a single blind assignment is not reliable for
+ * any target time beyond what's buffered yet. This verifies the seek
+ * actually landed close to the target and keeps retrying as more data
+ * streams in, with an 8s safety net so a seek that genuinely never sticks
+ * (a slow host, a truncated file) doesn't hang forever.
+ */
+export function seekReliably(el, time) {
+  return new Promise((resolve) => {
+    let settled = false;
+    let timeoutId = null;
+
+    function finish() {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      el.removeEventListener("seeked", onSeeked);
+      el.removeEventListener("progress", onProgress);
+      resolve();
+    }
+
+    function trySeek() {
+      try {
+        el.currentTime = time;
+      } catch {
+        // not seekable yet -- onProgress retries once more data has buffered.
+      }
+    }
+
+    function onSeeked() {
+      if (Math.abs(el.currentTime - time) < 0.75) finish();
+    }
+
+    function onProgress() {
+      if (!settled) trySeek();
+    }
+
+    function start() {
+      el.addEventListener("seeked", onSeeked);
+      el.addEventListener("progress", onProgress);
+      trySeek();
+      timeoutId = setTimeout(finish, 8000);
+    }
+
+    if (el.readyState >= 1) start();
+    else el.addEventListener("loadedmetadata", start, { once: true });
+  });
+}
+
 export function createPlaybackEngine() {
   const elements = [new Audio(), new Audio()];
   for (const el of elements) el.preload = "auto";
@@ -43,22 +98,9 @@ export function createPlaybackEngine() {
   const standbyEl = () => elements[1 - activeIdx];
   const currentBlock = () => program.blocks[blockIndex] ?? null;
 
-  function seekAndPlay(el, time) {
-    return new Promise((resolve) => {
-      function onReady() {
-        el.removeEventListener("loadedmetadata", onReady);
-        try {
-          el.currentTime = time;
-        } catch {
-          // metadata not ready in some browsers even at readyState 1 -- next tick's
-          // timeupdate-driven logic tolerates a slightly-off start time.
-        }
-        el.play().catch(() => {});
-        resolve();
-      }
-      if (el.readyState >= 1) onReady();
-      else el.addEventListener("loadedmetadata", onReady);
-    });
+  async function seekAndPlay(el, time) {
+    await seekReliably(el, time);
+    el.play().catch(() => {});
   }
 
   function preloadNext() {
@@ -136,10 +178,11 @@ export function createPlaybackEngine() {
     rafHandle = requestAnimationFrame(tick);
   }
 
-  async function playFromBlock(index) {
+  async function playFromBlock(index, seekTime) {
     if (index < 0 || index >= program.blocks.length) return;
     cancelLoop();
     const block = program.blocks[index];
+    const time = seekTime ?? block.inTime;
 
     // If the standby element already has this exact URL loading/loaded (from
     // a prior preloadNext()), swap to it instead of starting a second,
@@ -161,7 +204,7 @@ export function createPlaybackEngine() {
 
     blockIndex = index;
     crossfading = false;
-    await seekAndPlay(el, block.inTime);
+    await seekAndPlay(el, time);
     activeEl().volume = masterVolume;
     isPlaying = true;
     emit("blockchange", block, blockIndex);
@@ -217,8 +260,13 @@ export function createPlaybackEngine() {
       else this.play();
     },
 
-    skipToBlock(index) {
-      playFromBlock(index);
+    skipToBlock(index, time) {
+      playFromBlock(index, time);
+    },
+
+    /** Read-only reference to the current program's blocks -- used by the passage view to map a clicked word to a (blockIndex, time). */
+    getProgramBlocks() {
+      return program.blocks;
     },
 
     skipToNextBlock() {

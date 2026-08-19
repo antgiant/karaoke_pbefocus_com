@@ -179,12 +179,22 @@ function initSelectionUi(manifest, manifestUrl) {
   let unmountPlayerControls = null;
 
   const modeSelect = document.getElementById("modeSelect");
-  const hintLevelSelect = document.getElementById("hintLevelSelect");
+  const hintLevelInput = document.getElementById("hintLevelInput");
   const hintLevelLabel = document.getElementById("hintLevelLabel");
+  const hintLevelPercentSign = document.getElementById("hintLevelPercentSign");
+  const lookaheadSelect = document.getElementById("lookaheadSelect");
+  const lookaheadLabel = document.getElementById("lookaheadLabel");
+  const lengthMatchedRow = document.getElementById("lengthMatchedRow");
+  const lengthMatchedCheckbox = document.getElementById("lengthMatchedCheckbox");
   modeSelect.addEventListener("change", () => {
     const showHint = modeSelect.value === "invisible";
-    hintLevelSelect.hidden = !showHint;
+    hintLevelInput.hidden = !showHint;
     hintLevelLabel.hidden = !showHint;
+    hintLevelPercentSign.hidden = !showHint;
+    const showLookahead = modeSelect.value === "disappearing";
+    lookaheadSelect.hidden = !showLookahead;
+    lookaheadLabel.hidden = !showLookahead;
+    lengthMatchedRow.hidden = !["invisible", "blackout", "typeahead"].includes(modeSelect.value);
   });
 
   document.getElementById("startKaraokeBtn").addEventListener("click", () => {
@@ -207,16 +217,23 @@ function initSelectionUi(manifest, manifestUrl) {
 
     if (mode === "typeahead") {
       playerControls.innerHTML = "";
-      unmountStudyView = mountTypeAhead(karaokeView, program);
+      unmountStudyView = mountTypeAhead(karaokeView, program, () => lengthMatchedCheckbox.checked);
       return;
     }
 
     engine.loadProgram(program);
-    if (mode === "disappearing") unmountStudyView = mountDisappearingWord(karaokeView, engine);
-    else if (mode === "invisible") unmountStudyView = mountInvisibleWord(karaokeView, engine, () => Number(hintLevelSelect.value));
-    else if (mode === "blackout") unmountStudyView = mountBlackoutRamp(karaokeView, engine);
-    else if (mode === "singalong") unmountStudyView = mountSingAlong(karaokeView, engine);
-    else unmountStudyView = mountKaraoke(karaokeView, engine);
+    const getLengthMatched = () => lengthMatchedCheckbox.checked;
+    if (mode === "disappearing")
+      unmountStudyView = mountDisappearingWord(karaokeView, engine, manifest, mix, () => Number(lookaheadSelect.value));
+    else if (mode === "invisible")
+      unmountStudyView = mountInvisibleWord(
+        karaokeView, engine, manifest, mix,
+        () => Math.min(100, Math.max(0, Number(hintLevelInput.value) || 0)) / 100,
+        getLengthMatched
+      );
+    else if (mode === "blackout") unmountStudyView = mountBlackoutRamp(karaokeView, engine, manifest, mix, getLengthMatched);
+    else if (mode === "singalong") unmountStudyView = mountSingAlong(karaokeView, engine, manifest, mix);
+    else unmountStudyView = mountKaraoke(karaokeView, engine, manifest, mix);
     unmountPlayerControls = mountPlayerControls(playerControls, engine, { styleLabelFor });
     engine.play();
   });
@@ -233,7 +250,7 @@ function initSelectionUi(manifest, manifestUrl) {
     unmountPlayerControls = null;
     document.getElementById("karaokeView").innerHTML = "";
     document.getElementById("playerControls").innerHTML = "";
-    mountSleepMode(engine, program, { styleLabelFor });
+    mountSleepMode(engine, program, manifest, mix, { styleLabelFor });
   });
 }
 
