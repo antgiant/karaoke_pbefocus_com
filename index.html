@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PBE Playlist</title>
+    <link rel="stylesheet" href="assets/css/styles.css" />
+    <script type="module" src="assets/js/main.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href="https://pbefocus.com" aria-label="PBEfocus.com home">
+          <picture>
+            <source srcset="assets/pbefocus-logo-dark.png" media="(prefers-color-scheme: dark)">
+            <img src="assets/pbefocus-logo.png" alt="PBEfocus.com">
+          </picture>
+        </a>
+        <nav class="primary-nav" aria-label="Primary navigation">
+          <a href="https://pbefocus.com">Home</a>
+          <a href="https://quiz.pbefocus.com">Quiz Builder</a>
+          <a href="https://pbe-scores.wooleys.us">Score Keeper</a>
+          <a href="https://pbe.wooleys.us/">Fill-In-The-Blank</a>
+          <a class="active" href="/">Playlist</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="mission-statement">
+        <h1>PBE Playlist</h1>
+        <p>
+          Pick your chapters and verses, choose the musical style for each part of the
+          passage, then study with karaoke-style tools built for memorizing scripture.
+        </p>
+      </section>
+
+      <section id="gatePanel" class="panel gate-panel">
+        <h2>Library Access</h2>
+        <p>
+          This library isn't public yet. If you have a library link, paste it below
+          (or open this page with <code>?library=&lt;url&gt;</code> already in the address).
+        </p>
+        <form id="gateForm" class="gate-form">
+          <label for="gateUrlInput">Library manifest URL</label>
+          <input id="gateUrlInput" type="url" name="library" placeholder="https://…/library.json" required />
+          <button id="gateSubmitBtn" type="submit" class="btn">Unlock Library</button>
+        </form>
+        <p id="gateError" class="gate-error" role="alert" hidden></p>
+        <p id="gateStatus" class="gate-status" role="status" aria-live="polite" hidden></p>
+      </section>
+
+      <div id="appPanel" hidden>
+        <section class="panel">
+          <h2>Choose Chapters &amp; Verses</h2>
+          <div class="selection-toolbar">
+            <button id="selectAllBtn" type="button" class="btn secondary">Select All</button>
+            <button id="selectNoneBtn" type="button" class="btn secondary">Clear</button>
+          </div>
+          <div id="bookTree" class="book-list"></div>
+          <div class="selection-summary">
+            <span><span id="summarySectionCount">0</span> sections selected</span>
+            <span><span id="summaryWordCount">0</span> words</span>
+            <span>Estimated length: <span id="summaryDuration">~0:00</span></span>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <nav aria-label="Footer navigation">
+        <a href="https://pbefocus.com">PBEfocus.com</a>
+        <a href="https://quiz.pbefocus.com">Quiz Builder</a>
+        <a href="https://pbe-scores.wooleys.us">Score Keeper</a>
+        <a href="https://pbe.wooleys.us/">Fill-In-The-Blank</a>
+      </nav>
+      <p>&copy; PBE Focus. All rights reserved.</p>
+    </footer>
+  </body>
+</html>
