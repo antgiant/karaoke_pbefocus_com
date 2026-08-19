@@ -9,7 +9,7 @@ function formatTime(seconds) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-export function mountPlayerControls(container, engine) {
+export function mountPlayerControls(container, engine, { styleLabelFor = (id) => id } = {}) {
   container.innerHTML = "";
   container.className = "player-controls";
 
@@ -44,7 +44,9 @@ export function mountPlayerControls(container, engine) {
     }
     const elapsed = formatTime(Math.max(0, currentTimeInBlock - block.inTime));
     const duration = formatTime(block.outTime - block.inTime);
-    status.textContent = `${block.label} · ${elapsed} / ${duration} · section ${blockIndex + 1} of ${totalBlocks}`;
+    status.textContent =
+      `${block.label} (${styleLabelFor(block.style)}) · ${elapsed} / ${duration} · ` +
+      `section ${blockIndex + 1} of ${totalBlocks}`;
   }
 
   const unsubscribers = [

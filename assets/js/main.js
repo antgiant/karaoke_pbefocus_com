@@ -8,14 +8,22 @@ import {
   summarize,
   toggleKey,
 } from "./selection.js";
+import { createMix, fromSerializable, setDefaultStyle, syncMixToSelection, toSerializable } from "./mix.js";
+import { mountMixEditor } from "./mix-editor.js";
 import { buildProgram } from "./program-builder.js";
 import { createPlaybackEngine } from "./playback-engine.js";
 import { mountKaraoke } from "./study-modes/karaoke.js";
 import { mountPlayerControls } from "./player-controls.js";
 
-function persistAppState(manifestUrl, selected, styleId) {
+function persistAppState(manifestUrl, selected, mix) {
   const state = loadState();
-  saveState({ ...state, manifestUrl, selectedSectionKeys: [...selected], activeStyle: styleId });
+  saveState({
+    ...state,
+    manifestUrl,
+    selectedSectionKeys: [...selected],
+    activeStyle: mix.defaultStyleId,
+    mix: toSerializable(mix),
+  });
 }
 
 function renderSummary(selected, manifest) {
@@ -78,7 +86,7 @@ function renderBookTree(manifest, selected, onChange) {
   }
 }
 
-function renderStyleOptions(manifest, preferredStyleId) {
+function renderStyleOptions(manifest, selectedStyleId) {
   const select = document.getElementById("styleSelect");
   select.innerHTML = "";
   for (const style of manifest.styles) {
@@ -87,9 +95,7 @@ function renderStyleOptions(manifest, preferredStyleId) {
     option.textContent = style.label;
     select.appendChild(option);
   }
-  if (manifest.styles.some((s) => s.id === preferredStyleId)) {
-    select.value = preferredStyleId;
-  }
+  select.value = selectedStyleId;
   return select;
 }
 
@@ -101,7 +107,7 @@ function renderFallbackNote(manifest, fallbacks) {
   }
   const labelFor = (id) => manifest.styles.find((s) => s.id === id)?.label ?? id;
   note.textContent =
-    "Some sections aren't available in the style you picked, so they'll play in a different style instead: " +
+    "Some of your mix isn't available as chosen, so it'll play in a different style instead: " +
     fallbacks.map((f) => `${f.label} (using ${labelFor(f.usedStyle)})`).join("; ") + ".";
   note.hidden = false;
 }
@@ -110,12 +116,31 @@ function initSelectionUi(manifest, manifestUrl) {
   const state = loadState();
   const sameLibrary = state.manifestUrl === manifestUrl;
   const selected = createSelectionState(sameLibrary ? state.selectedSectionKeys : []);
-  const preferredStyleId = sameLibrary ? state.activeStyle : null;
+
+  const initialStyleId = (sameLibrary && state.activeStyle) || manifest.styles[0].id;
+  const mix = sameLibrary && state.mix ? fromSerializable(state.mix, manifest) : createMix(initialStyleId);
+  syncMixToSelection(mix, manifest, selected);
+
+  const styleSelect = renderStyleOptions(manifest, mix.defaultStyleId);
+  const mixEditorContainer = document.getElementById("mixEditor");
+  const toggleMixEditorBtn = document.getElementById("toggleMixEditorBtn");
+  let mixEditorHandle = null;
+
+  function renderMixEditorIfOpen() {
+    mixEditorHandle?.unmount();
+    mixEditorHandle = null;
+    if (mixEditorContainer.hidden) return;
+    mixEditorHandle = mountMixEditor(mixEditorContainer, manifest, mix, selected, () => {
+      persistAppState(manifestUrl, selected, mix);
+    });
+  }
 
   function rerender() {
-    persistAppState(manifestUrl, selected, styleSelect.value);
+    syncMixToSelection(mix, manifest, selected);
+    persistAppState(manifestUrl, selected, mix);
     renderBookTree(manifest, selected, rerender);
     renderSummary(selected, manifest);
+    renderMixEditorIfOpen();
   }
 
   document.getElementById("selectAllBtn").addEventListener("click", () => {
@@ -127,13 +152,23 @@ function initSelectionUi(manifest, manifestUrl) {
     rerender();
   });
 
-  const styleSelect = renderStyleOptions(manifest, preferredStyleId);
-  styleSelect.addEventListener("change", () => persistAppState(manifestUrl, selected, styleSelect.value));
+  toggleMixEditorBtn.addEventListener("click", () => {
+    mixEditorContainer.hidden = !mixEditorContainer.hidden;
+    toggleMixEditorBtn.textContent = mixEditorContainer.hidden ? "Customize Genre Mix" : "Hide Genre Mix";
+    renderMixEditorIfOpen();
+  });
+
+  styleSelect.addEventListener("change", () => {
+    setDefaultStyle(mix, styleSelect.value);
+    persistAppState(manifestUrl, selected, mix);
+    renderMixEditorIfOpen();
+  });
 
   renderBookTree(manifest, selected, rerender);
   renderSummary(selected, manifest);
 
   const engine = createPlaybackEngine();
+  const styleLabelFor = (id) => manifest.styles.find((s) => s.id === id)?.label ?? id;
   let unmountKaraoke = null;
   let unmountPlayerControls = null;
 
@@ -143,14 +178,14 @@ function initSelectionUi(manifest, manifestUrl) {
       alert("Select at least one chapter or verse range first.");
       return;
     }
-    const program = buildProgram(manifest, selected, styleSelect.value);
+    const program = buildProgram(manifest, mix, selected);
     renderFallbackNote(manifest, program.fallbacks);
 
     engine.loadProgram(program);
     unmountKaraoke?.();
     unmountPlayerControls?.();
     unmountKaraoke = mountKaraoke(document.getElementById("karaokeView"), engine);
-    unmountPlayerControls = mountPlayerControls(document.getElementById("playerControls"), engine);
+    unmountPlayerControls = mountPlayerControls(document.getElementById("playerControls"), engine, { styleLabelFor });
     engine.play();
   });
 }

@@ -25,3 +25,22 @@ export function bookSortIndex(book) {
   const i = CANONICAL_BOOK_ORDER.indexOf(book);
   return i === -1 ? CANONICAL_BOOK_ORDER.length : i;
 }
+
+// Fixed, colorblind-conscious swatch palette for the genre mix editor --
+// cycles by a style's position in manifest.styles, so it's stable across
+// reloads regardless of style id/label.
+export const STYLE_SWATCH_COLORS = [
+  "#0f6370", // teal (site accent)
+  "#b34a1e", // burnt orange
+  "#6a4c93", // violet
+  "#1f8a4c", // green
+  "#c2410c", // amber-red
+  "#2563eb", // blue
+  "#a3184e", // magenta
+  "#7c6f00", // olive
+];
+
+export function colorForStyle(styleId, styles) {
+  const index = styles.findIndex((s) => s.id === styleId);
+  return STYLE_SWATCH_COLORS[Math.max(0, index) % STYLE_SWATCH_COLORS.length];
+}

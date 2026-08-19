@@ -6,6 +6,7 @@ function defaultState() {
     manifestUrl: null,
     selectedSectionKeys: [],
     activeStyle: null,
+    mix: null,
   };
 }
 

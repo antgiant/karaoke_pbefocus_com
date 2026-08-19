@@ -398,6 +398,96 @@ main {
   font-weight: 800;
 }
 
+/* Genre mix editor */
+
+.mix-editor {
+  margin-top: 1.25rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--line);
+}
+
+.style-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.style-swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  padding: 0.4rem 0.85rem;
+  background: color-mix(in srgb, var(--swatch-color) 16%, transparent);
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.style-swatch::before {
+  content: "";
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: var(--swatch-color);
+  flex: 0 0 auto;
+}
+
+.style-swatch.active {
+  border-color: var(--swatch-color);
+  background: color-mix(in srgb, var(--swatch-color) 30%, transparent);
+}
+
+.mix-editor-hint {
+  margin: 0 0 1rem;
+  color: var(--teal-dark);
+  font-size: 0.9rem;
+}
+
+.mix-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+.mix-section-heading {
+  margin: 0 0 0.5rem;
+  color: var(--teal-dark);
+  font-weight: 800;
+  text-transform: uppercase;
+  font-size: 0.9rem;
+}
+
+.word-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  touch-action: none;
+  user-select: none;
+}
+
+.word-chip {
+  padding: 0.25rem 0.5rem;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--chip-color) 22%, #fff);
+  border: 1px solid color-mix(in srgb, var(--chip-color) 55%, transparent);
+  cursor: pointer;
+  font-size: 0.95rem;
+  touch-action: none;
+}
+
+.word-chip.selecting {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
 .site-footer {
   max-width: 1080px;
   margin: 1.3rem auto 0;
@@ -501,6 +591,28 @@ main {
 
   .karaoke-word.sung {
     color: #4c6b6b;
+  }
+
+  .mix-editor {
+    border-top: 1px solid var(--line);
+  }
+
+  .style-swatch {
+    color: var(--ink);
+  }
+
+  .word-strip {
+    background: #0d1f28;
+    border-color: var(--line);
+  }
+
+  .word-chip {
+    background: color-mix(in srgb, var(--chip-color) 30%, #0d1f28);
+    color: var(--ink);
+  }
+
+  .word-chip.selecting {
+    outline-color: var(--ink);
   }
 
   .site-footer {

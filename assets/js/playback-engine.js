@@ -138,12 +138,28 @@ export function createPlaybackEngine() {
   async function playFromBlock(index) {
     if (index < 0 || index >= program.blocks.length) return;
     cancelLoop();
-    for (const el of elements) el.pause();
+    const block = program.blocks[index];
+
+    // If the standby element already has this exact URL loading/loaded (from
+    // a prior preloadNext()), swap to it instead of starting a second,
+    // concurrent fetch of the same URL on the other element -- some servers
+    // (and this is reproducible against a plain dev server without Range
+    // support) never resolve loadedmetadata for a second simultaneous
+    // request to an identical URL, which would otherwise hang a manual
+    // skip forever.
+    let el;
+    if (standbyEl().src === block.audioUrl) {
+      activeEl().pause();
+      activeIdx = 1 - activeIdx;
+      el = activeEl();
+    } else {
+      for (const other of elements) other.pause();
+      el = activeEl();
+      if (el.src !== block.audioUrl) el.src = block.audioUrl;
+    }
+
     blockIndex = index;
     crossfading = false;
-    const el = activeEl();
-    const block = program.blocks[index];
-    if (el.src !== block.audioUrl) el.src = block.audioUrl;
     await seekAndPlay(el, block.inTime);
     activeEl().volume = 1;
     isPlaying = true;

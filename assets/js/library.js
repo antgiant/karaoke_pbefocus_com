@@ -73,6 +73,58 @@ export function orderedSections(manifest) {
     );
 }
 
+/** The lowest-take recording for a section in a given style, or null if that style isn't available there. */
+export function pickRecording(section, styleId) {
+  const candidates = section.recordings.filter((r) => r.style === styleId);
+  if (candidates.length === 0) return null;
+  return candidates.slice().sort((a, b) => a.take - b.take)[0];
+}
+
+/**
+ * The scripture words (verse != null) of whichever recording in this section
+ * has the most of them, in order. This is the addressable "canonical word
+ * sequence" the mix editor paints against -- picking one real recording
+ * (rather than needing the separate NKJV text, which the manifest
+ * deliberately doesn't carry) as the common reference every style's
+ * recording gets aligned to.
+ */
+export function canonicalWords(section) {
+  let best = null;
+  let bestCount = -1;
+  for (const r of section.recordings) {
+    const count = r.words.reduce((n, w) => n + (w.verse !== null ? 1 : 0), 0);
+    if (count > bestCount) {
+      bestCount = count;
+      best = r;
+    }
+  }
+  return best.words.filter((w) => w.verse !== null);
+}
+
+/**
+ * Maps each canonical word to the corresponding word in a specific style's
+ * own recording, by verse number + position-within-verse (NOT raw array
+ * index -- different recordings interleave spoken filler differently and
+ * can ad-lib/repeat lines, so index alignment would drift). Returns an
+ * array the same length as `canonical`; an entry is null where that style's
+ * recording has fewer words in that verse than the canonical sequence does
+ * (rare, but possible on a rough take).
+ */
+export function alignWordsToCanonical(canonical, styleWords) {
+  const byVerse = new Map();
+  for (const w of styleWords) {
+    if (w.verse === null) continue;
+    if (!byVerse.has(w.verse)) byVerse.set(w.verse, []);
+    byVerse.get(w.verse).push(w);
+  }
+  const cursor = new Map();
+  return canonical.map((cw) => {
+    const pos = cursor.get(cw.verse) ?? 0;
+    cursor.set(cw.verse, pos + 1);
+    return (byVerse.get(cw.verse) || [])[pos] ?? null;
+  });
+}
+
 // Rough spoken-word-rate estimate (words/sec) used only to give the
 // Pathfinder a sense of session length before playback exists (Phase 3).
 const ESTIMATED_WORDS_PER_SECOND = 2.2;

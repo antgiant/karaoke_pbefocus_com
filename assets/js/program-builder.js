@@ -1,24 +1,22 @@
-import { orderedSections, passageLabel, sectionKey } from "./library.js";
-
-/** The lowest-take recording for a section in a given style, or null if that style isn't available there. */
-export function pickRecording(section, styleId) {
-  const candidates = section.recordings.filter((r) => r.style === styleId);
-  if (candidates.length === 0) return null;
-  return candidates.slice().sort((a, b) => a.take - b.take)[0];
-}
+import { alignWordsToCanonical, canonicalWords, orderedSections, passageLabel, pickRecording, sectionKey } from "./library.js";
+import { getRuns } from "./mix.js";
 
 /**
- * Flattens a selection + a single active style into an ordered playback
- * program: one block per selected section, each pointing at one recording's
- * audio file and the word-time slice to play from it.
+ * Flattens a selection + genre mix into an ordered playback program: one
+ * block per contiguous same-style run (see mix.js/getRuns), each pointing
+ * at one recording's audio file and the word-time slice to play from it.
  *
- * Phase 3 only supports one style for the whole program (no per-word mix
- * yet -- that's program-builder's job to grow into once mix.js exists).
- * Falls back to the "default" style (then to whatever's first) for any
- * selected section that doesn't have a recording in the requested style,
- * and reports every fallback so the UI can tell the Pathfinder about it.
+ * A run's word range is expressed in canonical (scripture-word) positions,
+ * so it's translated into that specific style recording's own timing via
+ * alignWordsToCanonical -- see library.js for why raw index alignment
+ * across different recordings doesn't work. Falls back to the "default"
+ * style (then to whatever's first) for any run whose requested style has no
+ * recording for that section at all, and to skipping the run (rare) if the
+ * alignment comes up completely empty (e.g. a rough take with far fewer
+ * scripture words than the canonical count) -- both kinds of gap are
+ * reported so the UI can tell the Pathfinder about it.
  */
-export function buildProgram(manifest, selectedKeys, styleId) {
+export function buildProgram(manifest, mix, selectedKeys) {
   const selected = new Set(selectedKeys);
   const blocks = [];
   const fallbacks = [];
@@ -27,26 +25,41 @@ export function buildProgram(manifest, selectedKeys, styleId) {
     const key = sectionKey(section);
     if (!selected.has(key)) continue;
 
-    let recording = pickRecording(section, styleId);
-    let usedStyle = styleId;
-    if (!recording) {
-      recording = pickRecording(section, "default") || section.recordings[0];
-      usedStyle = recording.style;
-      fallbacks.push({ sectionKey: key, label: passageLabel(section), requestedStyle: styleId, usedStyle });
-    }
+    const runs = getRuns(mix, key);
+    const canonical = canonicalWords(section);
+    const label = passageLabel(section);
+    const multiPart = runs.length > 1;
 
-    const words = recording.words;
-    if (words.length === 0) continue;
+    runs.forEach((run, runIndex) => {
+      let recording = pickRecording(section, run.styleId);
+      let usedStyle = run.styleId;
+      if (!recording) {
+        recording = pickRecording(section, "default") || section.recordings[0];
+        usedStyle = recording.style;
+        fallbacks.push({ sectionKey: key, label, requestedStyle: run.styleId, usedStyle, reason: "style-unavailable" });
+      }
 
-    blocks.push({
-      sectionKey: key,
-      label: passageLabel(section),
-      style: usedStyle,
-      take: recording.take,
-      audioUrl: recording.audioUrl,
-      inTime: words[0].start,
-      outTime: words[words.length - 1].end,
-      words,
+      const aligned = alignWordsToCanonical(canonical, recording.words);
+      const slice = aligned.slice(run.startIndex, run.endIndex + 1).filter(Boolean);
+      if (slice.length === 0) {
+        fallbacks.push({ sectionKey: key, label, requestedStyle: run.styleId, usedStyle, reason: "no-aligned-audio" });
+        return;
+      }
+
+      const inTime = slice[0].start;
+      const outTime = slice[slice.length - 1].end;
+      const words = recording.words.filter((w) => w.start >= inTime && w.end <= outTime);
+
+      blocks.push({
+        sectionKey: key,
+        label: multiPart ? `${label} (part ${runIndex + 1}/${runs.length})` : label,
+        style: usedStyle,
+        take: recording.take,
+        audioUrl: recording.audioUrl,
+        inTime,
+        outTime,
+        words,
+      });
     });
   }
 
