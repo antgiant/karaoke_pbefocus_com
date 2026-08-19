@@ -13,6 +13,10 @@ import { mountMixEditor } from "./mix-editor.js";
 import { buildProgram } from "./program-builder.js";
 import { createPlaybackEngine } from "./playback-engine.js";
 import { mountKaraoke } from "./study-modes/karaoke.js";
+import { mountDisappearingWord } from "./study-modes/disappearing-word.js";
+import { mountInvisibleWord } from "./study-modes/invisible-word.js";
+import { mountBlackoutRamp } from "./study-modes/blackout-ramp.js";
+import { mountTypeAhead } from "./study-modes/type-ahead.js";
 import { mountPlayerControls } from "./player-controls.js";
 
 function persistAppState(manifestUrl, selected, mix) {
@@ -169,8 +173,17 @@ function initSelectionUi(manifest, manifestUrl) {
 
   const engine = createPlaybackEngine();
   const styleLabelFor = (id) => manifest.styles.find((s) => s.id === id)?.label ?? id;
-  let unmountKaraoke = null;
+  let unmountStudyView = null;
   let unmountPlayerControls = null;
+
+  const modeSelect = document.getElementById("modeSelect");
+  const hintLevelSelect = document.getElementById("hintLevelSelect");
+  const hintLevelLabel = document.getElementById("hintLevelLabel");
+  modeSelect.addEventListener("change", () => {
+    const showHint = modeSelect.value === "invisible";
+    hintLevelSelect.hidden = !showHint;
+    hintLevelLabel.hidden = !showHint;
+  });
 
   document.getElementById("startKaraokeBtn").addEventListener("click", () => {
     if (selected.size === 0) {
@@ -181,11 +194,27 @@ function initSelectionUi(manifest, manifestUrl) {
     const program = buildProgram(manifest, mix, selected);
     renderFallbackNote(manifest, program.fallbacks);
 
-    engine.loadProgram(program);
-    unmountKaraoke?.();
+    unmountStudyView?.();
     unmountPlayerControls?.();
-    unmountKaraoke = mountKaraoke(document.getElementById("karaokeView"), engine);
-    unmountPlayerControls = mountPlayerControls(document.getElementById("playerControls"), engine, { styleLabelFor });
+    unmountStudyView = null;
+    unmountPlayerControls = null;
+
+    const karaokeView = document.getElementById("karaokeView");
+    const playerControls = document.getElementById("playerControls");
+    const mode = modeSelect.value;
+
+    if (mode === "typeahead") {
+      playerControls.innerHTML = "";
+      unmountStudyView = mountTypeAhead(karaokeView, program);
+      return;
+    }
+
+    engine.loadProgram(program);
+    if (mode === "disappearing") unmountStudyView = mountDisappearingWord(karaokeView, engine);
+    else if (mode === "invisible") unmountStudyView = mountInvisibleWord(karaokeView, engine, () => Number(hintLevelSelect.value));
+    else if (mode === "blackout") unmountStudyView = mountBlackoutRamp(karaokeView, engine);
+    else unmountStudyView = mountKaraoke(karaokeView, engine);
+    unmountPlayerControls = mountPlayerControls(playerControls, engine, { styleLabelFor });
     engine.play();
   });
 }

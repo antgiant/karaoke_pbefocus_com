@@ -1,8 +1,8 @@
 import { wordIndexAtTime } from "../playback-engine.js";
 import { createWordStream } from "./word-stream.js";
 
-/** Standard karaoke: highlight the current word, dim ones already sung. */
-export function mountKaraoke(container, engine) {
+/** Words vanish immediately after being sung, instead of just dimming -- only upcoming text stays readable. */
+export function mountDisappearingWord(container, engine) {
   const stream = createWordStream(container);
   let currentBlock = null;
 
@@ -15,7 +15,9 @@ export function mountKaraoke(container, engine) {
     engine.on("blockchange", (block) => renderBlock(block)),
     engine.on("timeupdate", (t, block) => {
       if (block !== currentBlock) renderBlock(block);
-      stream.highlight(wordIndexAtTime(block.words, t));
+      stream.highlight(wordIndexAtTime(block.words, t), {
+        onPastWord: (el, isPast) => el.classList.toggle("gone", isPast),
+      });
     }),
   ];
 

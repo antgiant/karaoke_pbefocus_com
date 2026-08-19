@@ -398,6 +398,48 @@ main {
   font-weight: 800;
 }
 
+.karaoke-word.gone {
+  visibility: hidden;
+}
+
+.karaoke-word.blanked {
+  background: color-mix(in srgb, var(--teal) 12%, transparent);
+  color: transparent;
+  text-shadow: 0 0 0 var(--teal-dark);
+  opacity: 0.55;
+  border-radius: 4px;
+}
+
+.typeahead-form {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 1.1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.typeahead-form input[type="text"] {
+  flex: 1 1 200px;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 1.05rem;
+}
+
+.typeahead-feedback {
+  font-weight: 700;
+  color: var(--teal-dark);
+  min-width: 6rem;
+}
+
+.typeahead-feedback.error {
+  color: var(--danger);
+}
+
 /* Genre mix editor */
 
 .mix-editor {
@@ -591,6 +633,20 @@ main {
 
   .karaoke-word.sung {
     color: #4c6b6b;
+  }
+
+  .karaoke-word.blanked {
+    text-shadow: 0 0 0 var(--teal);
+  }
+
+  .typeahead-form {
+    border-top: 1px solid var(--line);
+  }
+
+  .typeahead-form input[type="text"] {
+    background: #0d1f28;
+    color: var(--ink);
+    border-color: var(--line);
   }
 
   .mix-editor {

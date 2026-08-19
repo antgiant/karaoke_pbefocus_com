@@ -71,9 +71,25 @@
             <label for="styleSelect">Musical style</label>
             <select id="styleSelect"></select>
             <button id="toggleMixEditorBtn" type="button" class="btn secondary">Customize Genre Mix</button>
-            <button id="startKaraokeBtn" type="button" class="btn">Start Karaoke</button>
           </div>
           <div id="mixEditor" hidden></div>
+          <div class="style-select-row">
+            <label for="modeSelect">Study mode</label>
+            <select id="modeSelect">
+              <option value="karaoke">Standard Karaoke</option>
+              <option value="disappearing">Disappearing Word</option>
+              <option value="invisible">Invisible Word</option>
+              <option value="blackout">Blackout Ramp</option>
+              <option value="typeahead">Type Ahead</option>
+            </select>
+            <label for="hintLevelSelect" id="hintLevelLabel" hidden>Hint level</label>
+            <select id="hintLevelSelect" hidden>
+              <option value="0">None</option>
+              <option value="0.15" selected>Some</option>
+              <option value="0.4">Most</option>
+            </select>
+            <button id="startKaraokeBtn" type="button" class="btn">Start Studying</button>
+          </div>
           <p id="fallbackNote" class="fallback-note" hidden></p>
           <div id="karaokeView"></div>
           <div id="playerControls"></div>
