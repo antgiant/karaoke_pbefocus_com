@@ -2,6 +2,7 @@ import { colorForStyle } from "../constants.js";
 import { canonicalWords, findSection, passageLabel } from "../library.js";
 import { getRuns } from "../mix.js";
 import { wordIndexAtTime } from "../playback-engine.js";
+import { stripTrailingVerseAnnouncement } from "./number-words.js";
 
 /**
  * Shared renderer for every engine-driven study mode (karaoke,
@@ -154,8 +155,9 @@ export function createPassageView(container, engine, manifest, mix) {
 
     let pending = [];
     let lastRealIndex = -1;
-    const flushBefore = (anchorEl) => {
-      for (const w of pending) {
+    const flushBefore = (anchorEl, targetVerse) => {
+      const toShow = stripTrailingVerseAnnouncement(pending, targetVerse);
+      for (const w of toShow) {
         const span = document.createElement("span");
         span.className = "karaoke-word filler";
         span.textContent = `${w.word} `;
@@ -171,7 +173,7 @@ export function createPassageView(container, engine, manifest, mix) {
         pending.push(w);
         continue;
       }
-      if (pending.length > 0 && wordEls[ci]) flushBefore(wordEls[ci]);
+      if (pending.length > 0 && wordEls[ci]) flushBefore(wordEls[ci], canonical[ci]?.verse);
       pending = [];
       lastRealIndex = ci;
     }

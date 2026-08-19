@@ -112,9 +112,10 @@ function renderFallbackNote(manifest, fallbacks) {
     return;
   }
   const labelFor = (id) => manifest.styles.find((s) => s.id === id)?.label ?? id;
+  const describe = (f) =>
+    f.usedStyle ? `${f.label} (using ${labelFor(f.usedStyle)} instead)` : `${f.label} (no audio available anywhere)`;
   note.textContent =
-    "Some of your mix isn't available as chosen, so it'll play in a different style instead: " +
-    fallbacks.map((f) => `${f.label} (using ${labelFor(f.usedStyle)})`).join("; ") + ".";
+    "Some of your mix isn't available as chosen, so it'll play differently there: " + fallbacks.map(describe).join("; ") + ".";
   note.hidden = false;
 }
 

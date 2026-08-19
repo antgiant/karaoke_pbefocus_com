@@ -1,22 +1,43 @@
 import { alignWordsToCanonical, canonicalWords, orderedSections, passageLabel, pickRecording, sectionKey } from "./library.js";
 import { getRuns } from "./mix.js";
 
+const FALLBACK_STYLE_ID = "default";
+
 /**
  * Flattens a selection + genre mix into an ordered playback program: one
- * block per contiguous same-style run (see mix.js/getRuns), each pointing
- * at one recording's audio file and the word-time slice to play from it.
+ * block per contiguous run of canonical words that actually share the same
+ * audio source, each pointing at one recording's audio file and the
+ * word-time slice to play from it.
  *
  * A run's word range is expressed in canonical (scripture-word) positions,
  * so it's translated into that specific style recording's own timing via
  * alignWordsToCanonical -- see library.js for why raw index alignment
- * across different recordings doesn't work. Falls back to the "default"
- * style (then to whatever's first) for any run whose requested style has no
- * recording for that section at all, and to skipping the run (rare) if the
- * alignment comes up completely empty (e.g. a rough take with far fewer
- * scripture words than the canonical count) -- both kinds of gap are
- * reported so the UI can tell the Pathfinder about it.
+ * across different recordings doesn't work.
+ *
+ * Two things can make the *actual* audio source for a given canonical word
+ * differ from what the mix nominally requested there, both handled the same
+ * way -- patch that word in from the reference ("default") recording
+ * instead of silently doing something worse -- and both reported via
+ * `fallbacks` so the UI can tell the Pathfinder about it:
+ *
+ * - The requested style has no recording for this section at all.
+ * - The requested style's recording has a genuine alignment gap for that
+ *   *specific* word (not the whole run) -- e.g. its own transcript is
+ *   missing an earlier short word due to an ASR mishearing, which shifts
+ *   every later position-within-verse count off by one. Previously this
+ *   silently played from wherever the run's first *successfully* aligned
+ *   word happened to land, which could skip several real words' worth of
+ *   audio while the display kept showing them -- confusing, and not what
+ *   "mixed genre" is supposed to mean. Patching per-word instead of
+ *   abandoning the whole run keeps the requested style for everything it
+ *   actually has, and only borrows the reference recording for the
+ *   specific gap.
+ *
+ * verseFilter (optional): Map<sectionKey, Set<verseNumber>> -- when a
+ * section has an entry, only those verses are included; everything else
+ * about the section (its selection, its mix) is unaffected.
  */
-export function buildProgram(manifest, mix, selectedKeys) {
+export function buildProgram(manifest, mix, selectedKeys, verseFilter) {
   const selected = new Set(selectedKeys);
   const blocks = [];
   const fallbacks = [];
@@ -25,39 +46,127 @@ export function buildProgram(manifest, mix, selectedKeys) {
     const key = sectionKey(section);
     if (!selected.has(key)) continue;
 
-    const runs = getRuns(mix, key);
     const canonical = canonicalWords(section);
     const label = passageLabel(section);
-    const multiPart = runs.length > 1;
+    const runs = getRuns(mix, key);
+    const verseSet = verseFilter?.get(key) ?? null;
 
-    runs.forEach((run, runIndex) => {
-      let recording = pickRecording(section, run.styleId);
-      let usedStyle = run.styleId;
-      if (!recording) {
-        recording = pickRecording(section, "default") || section.recordings[0];
-        usedStyle = recording.style;
-        fallbacks.push({ sectionKey: key, label, requestedStyle: run.styleId, usedStyle, reason: "style-unavailable" });
+    // Alignment (word object -> canonical index doesn't apply here; this is
+    // canonical index -> that recording's word, or null) computed once per
+    // style actually needed for this section, reused across every run/word
+    // that wants it instead of recomputing per run.
+    const alignmentCache = new Map(); // styleId -> { recording, aligned } | null
+    function alignmentFor(styleId) {
+      if (alignmentCache.has(styleId)) return alignmentCache.get(styleId);
+      const recording = pickRecording(section, styleId);
+      const result = recording ? { recording, aligned: alignWordsToCanonical(canonical, recording.words) } : null;
+      alignmentCache.set(styleId, result);
+      return result;
+    }
+
+    const fallback = alignmentFor(FALLBACK_STYLE_ID) || (section.recordings[0] ? alignmentFor(section.recordings[0].style) : null);
+
+    // One resolved source per canonical index: which recording actually
+    // supplies audio for that word, and why it differs from the request
+    // (if it does). null means excluded (verse filter) or truly
+    // unavailable anywhere (rare).
+    const plan = canonical.map((cw, i) => {
+      if (verseSet !== null && !verseSet.has(cw.verse)) return null;
+
+      const run = runs.find((r) => i >= r.startIndex && i <= r.endIndex);
+      const requestedStyle = run ? run.styleId : mix.defaultStyleId;
+      const requested = alignmentFor(requestedStyle);
+      const requestedWord = requested?.aligned[i];
+      if (requestedWord) {
+        return { styleId: requestedStyle, recording: requested.recording, word: requestedWord };
       }
 
-      const aligned = alignWordsToCanonical(canonical, recording.words);
-      const slice = aligned.slice(run.startIndex, run.endIndex + 1).filter(Boolean);
-      if (slice.length === 0) {
-        fallbacks.push({ sectionKey: key, label, requestedStyle: run.styleId, usedStyle, reason: "no-aligned-audio" });
-        return;
+      const reason = requested ? "alignment-gap" : "style-unavailable";
+      if (fallback?.aligned[i]) {
+        return { styleId: fallback.recording.style, recording: fallback.recording, word: fallback.aligned[i], fallbackFrom: requestedStyle, reason };
       }
+      return { unavailable: true, fallbackFrom: requestedStyle, reason: "no-aligned-audio" };
+    });
+
+    // Which verse(s) a canonical index range spans, for readable fallback labels --
+    // "1 Peter 2:5" or "1 Peter 2:5-7", not the section label repeated with no way
+    // to tell which of several unrelated gaps in the same section a note is about.
+    function verseRangeLabel(startIndex, endIndex) {
+      const vStart = canonical[startIndex]?.verse;
+      const vEnd = canonical[endIndex]?.verse;
+      if (vStart === undefined) return label;
+      return vStart === vEnd ? `${label}:${vStart}` : `${label}:${vStart}-${vEnd}`;
+    }
+
+    // Run-length-encode the plan by (recording, contiguous canonical range) into playable
+    // segments -- entries with no recording (verse-filtered out, or truly unavailable
+    // anywhere) never join a segment. A segment reports at most one fallback note (from
+    // its first patched word) with the verse range it covers, not one per word -- a
+    // multi-word gap patched from the same fallback recording is one story, not a flood
+    // of identical-looking notes with no way to tell them apart.
+    const segments = [];
+    let current = null;
+    const unavailableRanges = [];
+    let unavailableStart = null;
+    plan.forEach((entry, i) => {
+      if (entry?.unavailable) {
+        if (unavailableStart === null) unavailableStart = i;
+      } else if (unavailableStart !== null) {
+        unavailableRanges.push({ startIndex: unavailableStart, endIndex: i - 1 });
+        unavailableStart = null;
+      }
+
+      if (!entry?.recording || entry.recording !== current?.recording) {
+        if (current) segments.push(current);
+        current = entry?.recording
+          ? { recording: entry.recording, styleId: entry.styleId, startIndex: i, endIndex: i, fallbackFrom: entry.fallbackFrom, reason: entry.reason }
+          : null;
+      } else {
+        current.endIndex = i;
+      }
+    });
+    if (current) segments.push(current);
+    if (unavailableStart !== null) unavailableRanges.push({ startIndex: unavailableStart, endIndex: plan.length - 1 });
+
+    for (const seg of segments) {
+      if (seg.fallbackFrom) {
+        fallbacks.push({
+          sectionKey: key,
+          label: verseRangeLabel(seg.startIndex, seg.endIndex),
+          requestedStyle: seg.fallbackFrom,
+          usedStyle: seg.styleId,
+          reason: seg.reason,
+        });
+      }
+    }
+    for (const range of unavailableRanges) {
+      fallbacks.push({
+        sectionKey: key,
+        label: verseRangeLabel(range.startIndex, range.endIndex),
+        requestedStyle: null,
+        usedStyle: null,
+        reason: "no-aligned-audio",
+      });
+    }
+
+    const multiPart = segments.length > 1;
+    segments.forEach((seg, segIndex) => {
+      const { recording, styleId } = seg;
+      // styleId always equals recording.style here (plan entries are only ever
+      // built from alignmentFor(styleId)'s own recording), so this is always a cache hit.
+      const aligned = alignmentFor(styleId).aligned;
+      const slice = aligned.slice(seg.startIndex, seg.endIndex + 1).filter(Boolean);
+      if (slice.length === 0) return;
 
       const inTime = slice[0].start;
       const outTime = slice[slice.length - 1].end;
       const words = recording.words.filter((w) => w.start >= inTime && w.end <= outTime);
 
-      // Word object -> canonical index, computed once here from the FULL
-      // recording (not the `words` slice above) -- position-within-verse
-      // has to be counted across the whole take, not reset at wherever this
-      // run happens to start/end, or a run beginning or ending mid-verse
-      // gets every word after that point mapped to the wrong canonical
-      // index. The display layer (word-stream.js) reuses this directly
-      // instead of re-deriving it from a slice, which is exactly the bug
-      // that caused it to.
+      // Word object -> canonical index, from the FULL recording (not the
+      // `words` slice above) -- position-within-verse has to be counted
+      // across the whole take, not reset at wherever this segment happens
+      // to start/end, or a segment beginning or ending mid-verse gets every
+      // word after that point mapped to the wrong canonical index.
       const canonicalIndexMap = new Map();
       aligned.forEach((w, ci) => {
         if (w) canonicalIndexMap.set(w, ci);
@@ -65,8 +174,8 @@ export function buildProgram(manifest, mix, selectedKeys) {
 
       blocks.push({
         sectionKey: key,
-        label: multiPart ? `${label} (part ${runIndex + 1}/${runs.length})` : label,
-        style: usedStyle,
+        label: multiPart ? `${label} (part ${segIndex + 1}/${segments.length})` : label,
+        style: styleId,
         take: recording.take,
         audioUrl: recording.audioUrl,
         inTime,

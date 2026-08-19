@@ -17,6 +17,14 @@
   box-sizing: border-box;
 }
 
+/* Any rule elsewhere that sets `display` on an element (author CSS beats the
+   browser's default [hidden] { display: none } UA rule regardless of
+   selector specificity, since UA styles are the lowest-priority origin)
+   would otherwise make the hidden attribute silently stop working. */
+[hidden] {
+  display: none !important;
+}
+
 html {
   background: #f5f5f2;
 }
