@@ -17,6 +17,7 @@ import { mountDisappearingWord } from "./study-modes/disappearing-word.js";
 import { mountInvisibleWord } from "./study-modes/invisible-word.js";
 import { mountBlackoutRamp } from "./study-modes/blackout-ramp.js";
 import { mountTypeAhead } from "./study-modes/type-ahead.js";
+import { mountSingAlong } from "./study-modes/sing-along.js";
 import { mountPlayerControls } from "./player-controls.js";
 
 function persistAppState(manifestUrl, selected, mix) {
@@ -213,6 +214,7 @@ function initSelectionUi(manifest, manifestUrl) {
     if (mode === "disappearing") unmountStudyView = mountDisappearingWord(karaokeView, engine);
     else if (mode === "invisible") unmountStudyView = mountInvisibleWord(karaokeView, engine, () => Number(hintLevelSelect.value));
     else if (mode === "blackout") unmountStudyView = mountBlackoutRamp(karaokeView, engine);
+    else if (mode === "singalong") unmountStudyView = mountSingAlong(karaokeView, engine);
     else unmountStudyView = mountKaraoke(karaokeView, engine);
     unmountPlayerControls = mountPlayerControls(playerControls, engine, { styleLabelFor });
     engine.play();

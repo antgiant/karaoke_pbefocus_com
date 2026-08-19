@@ -410,6 +410,25 @@ main {
   border-radius: 4px;
 }
 
+.karaoke-word.hit {
+  background: color-mix(in srgb, #1f8a4c 25%, transparent);
+  border-radius: 4px;
+}
+
+.singalong-score {
+  margin: 0.9rem 0 0.4rem;
+  font-weight: 800;
+  color: var(--teal-dark);
+  font-size: 1.1rem;
+}
+
+.singalong-status {
+  margin: 0.3rem 0 0;
+  color: var(--teal-dark);
+  font-size: 0.9rem;
+  min-height: 1.2em;
+}
+
 .typeahead-form {
   display: flex;
   align-items: center;
