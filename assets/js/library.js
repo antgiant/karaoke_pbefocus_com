@@ -44,6 +44,7 @@ export function buildBookTree(manifest) {
       label: passageLabel(section),
       wordCount: section.recordings[0]?.words.length ?? 0,
       styleIds: [...new Set(section.recordings.map((r) => r.style))],
+      verseNumbers: sectionVerseNumbers(section),
     });
   }
 
@@ -101,6 +102,11 @@ export function canonicalWords(section) {
   return best.words.filter((w) => w.verse !== null);
 }
 
+/** Distinct verse numbers actually present in a section, in order -- the selectable set for the per-chapter verse picker (not just verseStart..verseEnd, since a rough take can be missing a verse's audio entirely). */
+export function sectionVerseNumbers(section) {
+  return [...new Set(canonicalWords(section).map((w) => w.verse))].sort((a, b) => a - b);
+}
+
 /**
  * Maps each canonical word to the corresponding word in a specific style's
  * own recording, by verse number + position-within-verse (NOT raw array
@@ -131,6 +137,26 @@ const ESTIMATED_WORDS_PER_SECOND = 2.2;
 
 export function estimateSeconds(wordCount) {
   return wordCount / ESTIMATED_WORDS_PER_SECOND;
+}
+
+/** Sorted, deduped verse numbers -> "1-3, 5, 9-11", for the verse-picker summary. */
+export function formatVerseRanges(verses) {
+  if (verses.length === 0) return "";
+  const ranges = [];
+  let start = verses[0];
+  let prev = verses[0];
+  for (let i = 1; i < verses.length; i++) {
+    const v = verses[i];
+    if (v === prev + 1) {
+      prev = v;
+      continue;
+    }
+    ranges.push(start === prev ? `${start}` : `${start}-${prev}`);
+    start = v;
+    prev = v;
+  }
+  ranges.push(start === prev ? `${start}` : `${start}-${prev}`);
+  return ranges.join(", ");
 }
 
 export function formatDuration(seconds) {

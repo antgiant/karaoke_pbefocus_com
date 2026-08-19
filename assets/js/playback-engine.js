@@ -46,6 +46,8 @@ export function seekReliably(el, time) {
       clearTimeout(timeoutId);
       el.removeEventListener("seeked", onSeeked);
       el.removeEventListener("progress", onProgress);
+      el.removeEventListener("loadedmetadata", start);
+      el.removeEventListener("error", finish);
       resolve();
     }
 
@@ -69,11 +71,20 @@ export function seekReliably(el, time) {
       el.addEventListener("seeked", onSeeked);
       el.addEventListener("progress", onProgress);
       trySeek();
-      timeoutId = setTimeout(finish, 8000);
     }
+
+    // A source that fails to load (404, network error, unsupported format)
+    // never fires loadedmetadata -- without this listener, start() would
+    // never run, and relying on the 8s timeout alone wouldn't help either
+    // since it used to only get scheduled from inside start(). Both gaps
+    // meant one bad recording hung this promise (and everything awaiting
+    // it, i.e. all playback) forever instead of just skipping past it.
+    el.addEventListener("error", finish, { once: true });
 
     if (el.readyState >= 1) start();
     else el.addEventListener("loadedmetadata", start, { once: true });
+
+    timeoutId = setTimeout(finish, 8000);
   });
 }
 

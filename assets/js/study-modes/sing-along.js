@@ -17,7 +17,7 @@ export function isSingAlongSupported() {
  * plain explanation instead of a mic button on browsers without
  * SpeechRecognition (notably Firefox).
  */
-export function mountSingAlong(container, engine, manifest, mix) {
+export function mountSingAlong(container, engine, manifest, mix, verseFilter) {
   if (!isSingAlongSupported()) {
     container.innerHTML = "";
     const note = document.createElement("p");
@@ -30,7 +30,7 @@ export function mountSingAlong(container, engine, manifest, mix) {
     return function unmount() {};
   }
 
-  const view = createPassageView(container, engine, manifest, mix);
+  const view = createPassageView(container, engine, manifest, mix, verseFilter);
   view.setRenderWord((w) => ({ text: w.word }));
 
   const privacyNote = document.createElement("p");

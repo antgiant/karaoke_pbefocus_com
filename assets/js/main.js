@@ -1,10 +1,14 @@
-import { buildBookTree, formatDuration } from "./library.js";
+import { buildBookTree, formatDuration, formatVerseRanges } from "./library.js";
 import { initGate } from "./gate.js";
 import { loadState, saveState } from "./storage.js";
 import {
   bookSelectionState,
   createSelectionState,
+  createVerseSelections,
+  getSelectedVerses,
+  serializeVerseSelections,
   setBookSelected,
+  setSelectedVerses,
   summarize,
   toggleKey,
 } from "./selection.js";
@@ -21,27 +25,146 @@ import { mountSingAlong } from "./study-modes/sing-along.js";
 import { mountSleepMode } from "./sleep-mode.js";
 import { mountPlayerControls } from "./player-controls.js";
 
-function persistAppState(manifestUrl, selected, mix) {
+function persistAppState(manifestUrl, selected, verseSelections, mix) {
   const state = loadState();
   saveState({
     ...state,
     manifestUrl,
     selectedSectionKeys: [...selected],
+    verseSelections: serializeVerseSelections(verseSelections),
     activeStyle: mix.defaultStyleId,
     mix: toSerializable(mix),
   });
 }
 
-function renderSummary(selected, manifest) {
-  const { sectionCount, wordCount, estimatedSeconds } = summarize(selected, manifest);
+function renderSummary(selected, manifest, verseSelections) {
+  const { sectionCount, wordCount, estimatedSeconds } = summarize(selected, manifest, verseSelections);
   document.getElementById("summarySectionCount").textContent = sectionCount;
   document.getElementById("summaryWordCount").textContent = wordCount.toLocaleString();
   document.getElementById("summaryDuration").textContent = `~${formatDuration(estimatedSeconds)}`;
 }
 
-const openBooks = new Set();
+/** sectionKey -> Set<verseNumber>, restricted to currently-selected sections -- the shape buildProgram's verseFilter expects. */
+function buildVerseFilter(selected, verseSelections) {
+  const filter = new Map();
+  for (const [key, verses] of verseSelections) {
+    if (selected.has(key)) filter.set(key, verses);
+  }
+  return filter;
+}
 
-function renderBookTree(manifest, selected, onChange) {
+const openBooks = new Set();
+const openVersePickers = new Set();
+
+/** Per-chapter verse picker: All/Clear/range controls plus one checkbox per verse the chapter actually has recorded. Returns null for chapters with 0-1 verses -- nothing there to narrow. */
+function renderVersePicker(chapter, selected, verseSelections, onChange) {
+  const { key, verseNumbers } = chapter;
+  if (verseNumbers.length <= 1) return null;
+
+  const isChecked = selected.has(key);
+  const effective = getSelectedVerses(verseSelections, key, verseNumbers);
+  const effectiveSet = new Set(effective);
+
+  const details = document.createElement("details");
+  details.className = "verse-picker" + (isChecked ? "" : " is-disabled");
+  details.open = openVersePickers.has(key);
+  details.addEventListener("toggle", () => {
+    if (details.open) openVersePickers.add(key);
+    else openVersePickers.delete(key);
+  });
+
+  const summary = document.createElement("summary");
+  summary.textContent =
+    effective.length === verseNumbers.length
+      ? "All verses"
+      : effective.length === 0
+        ? "No verses selected"
+        : `Verses: ${formatVerseRanges(effective)}`;
+  details.appendChild(summary);
+
+  function applyVerses(verses) {
+    setSelectedVerses(verseSelections, key, verses, verseNumbers);
+    onChange();
+  }
+
+  const first = verseNumbers[0];
+  const last = verseNumbers[verseNumbers.length - 1];
+
+  const actions = document.createElement("div");
+  actions.className = "verse-actions";
+
+  const allBtn = document.createElement("button");
+  allBtn.type = "button";
+  allBtn.className = "btn tiny";
+  allBtn.textContent = "All";
+  allBtn.disabled = !isChecked;
+  allBtn.addEventListener("click", () => applyVerses(verseNumbers));
+
+  const clearBtn = document.createElement("button");
+  clearBtn.type = "button";
+  clearBtn.className = "btn tiny";
+  clearBtn.textContent = "Clear";
+  clearBtn.disabled = !isChecked;
+  clearBtn.addEventListener("click", () => applyVerses([]));
+
+  const rangeStart = document.createElement("input");
+  rangeStart.type = "number";
+  rangeStart.className = "verse-range-input";
+  rangeStart.min = String(first);
+  rangeStart.max = String(last);
+  rangeStart.placeholder = String(first);
+  rangeStart.disabled = !isChecked;
+  rangeStart.setAttribute("aria-label", "Range start verse");
+
+  const rangeEnd = document.createElement("input");
+  rangeEnd.type = "number";
+  rangeEnd.className = "verse-range-input";
+  rangeEnd.min = String(first);
+  rangeEnd.max = String(last);
+  rangeEnd.placeholder = String(last);
+  rangeEnd.disabled = !isChecked;
+  rangeEnd.setAttribute("aria-label", "Range end verse");
+
+  const rangeBtn = document.createElement("button");
+  rangeBtn.type = "button";
+  rangeBtn.className = "btn tiny";
+  rangeBtn.textContent = "Apply Range";
+  rangeBtn.disabled = !isChecked;
+  rangeBtn.addEventListener("click", () => {
+    const start = Number(rangeStart.value) || first;
+    const end = Number(rangeEnd.value) || last;
+    const [lo, hi] = start <= end ? [start, end] : [end, start];
+    applyVerses(verseNumbers.filter((v) => v >= lo && v <= hi));
+  });
+
+  actions.append(allBtn, clearBtn, rangeStart, document.createTextNode("to"), rangeEnd, rangeBtn);
+  details.appendChild(actions);
+
+  const grid = document.createElement("div");
+  grid.className = "verse-grid";
+  for (const verse of verseNumbers) {
+    const verseLabel = document.createElement("label");
+    verseLabel.className = "verse-check";
+    const verseCheckbox = document.createElement("input");
+    verseCheckbox.type = "checkbox";
+    verseCheckbox.checked = effectiveSet.has(verse);
+    verseCheckbox.disabled = !isChecked;
+    verseCheckbox.addEventListener("change", () => {
+      const next = new Set(getSelectedVerses(verseSelections, key, verseNumbers));
+      if (verseCheckbox.checked) next.add(verse);
+      else next.delete(verse);
+      applyVerses([...next]);
+    });
+    verseLabel.appendChild(verseCheckbox);
+    verseLabel.appendChild(document.createTextNode(String(verse)));
+    grid.appendChild(verseLabel);
+  }
+  details.appendChild(grid);
+
+  return details;
+}
+
+function renderBookTree(manifest, selected, verseSelections, onChange) {
   const tree = buildBookTree(manifest);
   const container = document.getElementById("bookTree");
   container.innerHTML = "";
@@ -74,6 +197,9 @@ function renderBookTree(manifest, selected, onChange) {
     const list = document.createElement("div");
     list.className = "chapter-list";
     for (const chapter of chapters) {
+      const item = document.createElement("div");
+      item.className = "chapter-item";
+
       const label = document.createElement("label");
       label.className = "chapter-check";
       const checkbox = document.createElement("input");
@@ -85,7 +211,12 @@ function renderBookTree(manifest, selected, onChange) {
       });
       label.appendChild(checkbox);
       label.appendChild(document.createTextNode(chapter.label));
-      list.appendChild(label);
+      item.appendChild(label);
+
+      const versePicker = renderVersePicker(chapter, selected, verseSelections, onChange);
+      if (versePicker) item.appendChild(versePicker);
+
+      list.appendChild(item);
     }
     details.appendChild(list);
     container.appendChild(details);
@@ -123,6 +254,7 @@ function initSelectionUi(manifest, manifestUrl) {
   const state = loadState();
   const sameLibrary = state.manifestUrl === manifestUrl;
   const selected = createSelectionState(sameLibrary ? state.selectedSectionKeys : []);
+  const verseSelections = createVerseSelections(sameLibrary ? state.verseSelections : {});
 
   const initialStyleId = (sameLibrary && state.activeStyle) || manifest.styles[0].id;
   const mix = sameLibrary && state.mix ? fromSerializable(state.mix, manifest) : createMix(initialStyleId);
@@ -138,15 +270,15 @@ function initSelectionUi(manifest, manifestUrl) {
     mixEditorHandle = null;
     if (mixEditorContainer.hidden) return;
     mixEditorHandle = mountMixEditor(mixEditorContainer, manifest, mix, selected, () => {
-      persistAppState(manifestUrl, selected, mix);
+      persistAppState(manifestUrl, selected, verseSelections, mix);
     });
   }
 
   function rerender() {
     syncMixToSelection(mix, manifest, selected);
-    persistAppState(manifestUrl, selected, mix);
-    renderBookTree(manifest, selected, rerender);
-    renderSummary(selected, manifest);
+    persistAppState(manifestUrl, selected, verseSelections, mix);
+    renderBookTree(manifest, selected, verseSelections, rerender);
+    renderSummary(selected, manifest, verseSelections);
     renderMixEditorIfOpen();
   }
 
@@ -167,12 +299,12 @@ function initSelectionUi(manifest, manifestUrl) {
 
   styleSelect.addEventListener("change", () => {
     setDefaultStyle(mix, styleSelect.value);
-    persistAppState(manifestUrl, selected, mix);
+    persistAppState(manifestUrl, selected, verseSelections, mix);
     renderMixEditorIfOpen();
   });
 
-  renderBookTree(manifest, selected, rerender);
-  renderSummary(selected, manifest);
+  renderBookTree(manifest, selected, verseSelections, rerender);
+  renderSummary(selected, manifest, verseSelections);
 
   const engine = createPlaybackEngine();
   const styleLabelFor = (id) => manifest.styles.find((s) => s.id === id)?.label ?? id;
@@ -204,7 +336,8 @@ function initSelectionUi(manifest, manifestUrl) {
       alert("Select at least one chapter or verse range first.");
       return;
     }
-    const program = buildProgram(manifest, mix, selected);
+    const verseFilter = buildVerseFilter(selected, verseSelections);
+    const program = buildProgram(manifest, mix, selected, verseFilter);
     renderFallbackNote(manifest, program.fallbacks);
 
     unmountStudyView?.();
@@ -225,16 +358,17 @@ function initSelectionUi(manifest, manifestUrl) {
     engine.loadProgram(program);
     const getLengthMatched = () => lengthMatchedCheckbox.checked;
     if (mode === "disappearing")
-      unmountStudyView = mountDisappearingWord(karaokeView, engine, manifest, mix, () => Number(lookaheadSelect.value));
+      unmountStudyView = mountDisappearingWord(karaokeView, engine, manifest, mix, () => Number(lookaheadSelect.value), verseFilter);
     else if (mode === "invisible")
       unmountStudyView = mountInvisibleWord(
         karaokeView, engine, manifest, mix,
         () => Math.min(100, Math.max(0, Number(hintLevelInput.value) || 0)) / 100,
-        getLengthMatched
+        getLengthMatched,
+        verseFilter
       );
-    else if (mode === "blackout") unmountStudyView = mountBlackoutRamp(karaokeView, engine, manifest, mix, getLengthMatched);
-    else if (mode === "singalong") unmountStudyView = mountSingAlong(karaokeView, engine, manifest, mix);
-    else unmountStudyView = mountKaraoke(karaokeView, engine, manifest, mix);
+    else if (mode === "blackout") unmountStudyView = mountBlackoutRamp(karaokeView, engine, manifest, mix, getLengthMatched, verseFilter);
+    else if (mode === "singalong") unmountStudyView = mountSingAlong(karaokeView, engine, manifest, mix, verseFilter);
+    else unmountStudyView = mountKaraoke(karaokeView, engine, manifest, mix, verseFilter);
     unmountPlayerControls = mountPlayerControls(playerControls, engine, { styleLabelFor });
     engine.play();
   });
@@ -244,14 +378,15 @@ function initSelectionUi(manifest, manifestUrl) {
       alert("Select at least one chapter or verse range first.");
       return;
     }
-    const program = buildProgram(manifest, mix, selected);
+    const verseFilter = buildVerseFilter(selected, verseSelections);
+    const program = buildProgram(manifest, mix, selected, verseFilter);
     unmountStudyView?.();
     unmountPlayerControls?.();
     unmountStudyView = null;
     unmountPlayerControls = null;
     document.getElementById("karaokeView").innerHTML = "";
     document.getElementById("playerControls").innerHTML = "";
-    mountSleepMode(engine, program, manifest, mix, { styleLabelFor });
+    mountSleepMode(engine, program, manifest, mix, { styleLabelFor, verseFilter });
   });
 }
 

@@ -8,8 +8,8 @@ import { createPassageView } from "./word-stream.js";
  * as soon as it starts. 2 also hides the next upcoming word, etc. -- each
  * step forces recall one word further ahead of the audio.
  */
-export function mountDisappearingWord(container, engine, manifest, mix, getLookahead = () => 0) {
-  const view = createPassageView(container, engine, manifest, mix);
+export function mountDisappearingWord(container, engine, manifest, mix, getLookahead = () => 0, verseFilter) {
+  const view = createPassageView(container, engine, manifest, mix, verseFilter);
   view.setRenderWord((w) => ({ text: w.word }));
   view.setOnPastWord((el, isPast, i, word, activeIndex) => {
     const gone = activeIndex >= 0 && i < activeIndex + getLookahead();

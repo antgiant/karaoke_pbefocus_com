@@ -316,10 +316,14 @@ details.panel:not([open]) h2 {
 }
 
 .chapter-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
   padding: 0.75rem 0.9rem 0.9rem;
+}
+
+.chapter-item {
+  border-radius: 6px;
 }
 
 .chapter-check {
@@ -333,6 +337,86 @@ details.panel:not([open]) h2 {
 }
 
 .chapter-check:hover {
+  background: rgba(15, 99, 112, 0.08);
+}
+
+.btn.tiny {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.85rem;
+  border-radius: 6px;
+}
+
+.verse-picker {
+  margin: 0.15rem 0 0.3rem 1.6rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(15, 99, 112, 0.03);
+}
+
+.verse-picker.is-disabled {
+  opacity: 0.55;
+}
+
+.verse-picker summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--teal-dark);
+  list-style: none;
+}
+
+.verse-picker summary::-webkit-details-marker {
+  display: none;
+}
+
+.verse-picker summary::before {
+  content: "\25B8";
+  display: inline-block;
+  margin-right: 0.35rem;
+  transition: transform 0.15s ease;
+}
+
+.verse-picker[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.verse-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.5rem 0;
+}
+
+.verse-range-input {
+  width: 3.5rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.85rem;
+}
+
+.verse-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(2.6rem, 1fr));
+  gap: 0.25rem;
+}
+
+.verse-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.verse-check:hover {
   background: rgba(15, 99, 112, 0.08);
 }
 
@@ -911,8 +995,19 @@ body.sleep-mode-active {
     border-color: rgba(255, 138, 128, 0.4);
   }
 
-  .chapter-check:hover {
+  .chapter-check:hover,
+  .verse-check:hover {
     background: rgba(99, 199, 207, 0.1);
+  }
+
+  .verse-picker {
+    background: rgba(99, 199, 207, 0.06);
+  }
+
+  .verse-range-input {
+    background: #0d1f28;
+    color: var(--ink);
+    border-color: var(--line);
   }
 
   .style-select-row select,
@@ -1032,7 +1127,11 @@ body.sleep-mode-active {
     padding: 1.15rem;
   }
 
-  .chapter-list {
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  .verse-picker {
+    margin-left: 0.5rem;
+  }
+
+  .verse-grid {
+    grid-template-columns: repeat(auto-fill, minmax(2.2rem, 1fr));
   }
 }

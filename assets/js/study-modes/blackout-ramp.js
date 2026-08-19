@@ -15,8 +15,8 @@ const MIN_REVEAL = 0;
  * spaced-repetition style drilling: easy the first time, blanker on each
  * replay.
  */
-export function mountBlackoutRamp(container, engine, manifest, mix, getLengthMatched = () => false) {
-  const view = createPassageView(container, engine, manifest, mix);
+export function mountBlackoutRamp(container, engine, manifest, mix, getLengthMatched = () => false, verseFilter) {
+  const view = createPassageView(container, engine, manifest, mix, verseFilter);
   const playCounts = new Map();
   let revealed = new Set();
   let hinted = new Set();

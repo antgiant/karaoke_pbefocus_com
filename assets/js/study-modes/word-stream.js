@@ -36,7 +36,7 @@ import { stripTrailingVerseAnnouncement } from "./number-words.js";
  * Each mode supplies renderWord()/onPastWord() to customize how a word
  * looks without needing to know any of this section/mix/seeking plumbing.
  */
-export function createPassageView(container, engine, manifest, mix) {
+export function createPassageView(container, engine, manifest, mix, verseFilter) {
   container.innerHTML = "";
   container.className = "karaoke-view";
   const heading = document.createElement("p");
@@ -96,6 +96,14 @@ export function createPassageView(container, engine, manifest, mix) {
     wordEls = [];
     onSectionChangeFn?.(section, canonical);
 
+    // A section studied with a narrowed verse range still has its complete
+    // canonical word list here (indices must stay aligned with every block's
+    // canonicalIndexMap, which is built against the full recording) -- verses
+    // outside the filter are hidden rather than excluded from `canonical`,
+    // so they simply never get audio (buildProgram already leaves them out
+    // of every block) while everything else here stays untouched.
+    const allowedVerses = verseFilter?.get(sectionKey) ?? null;
+
     let openVerse;
     let verseEl = null;
     canonical.forEach((w, i) => {
@@ -103,6 +111,7 @@ export function createPassageView(container, engine, manifest, mix) {
         openVerse = w.verse;
         verseEl = document.createElement("p");
         verseEl.className = "karaoke-verse";
+        verseEl.hidden = allowedVerses ? !allowedVerses.has(openVerse) : false;
         const num = document.createElement("sup");
         num.className = "verse-num";
         num.textContent = String(openVerse);

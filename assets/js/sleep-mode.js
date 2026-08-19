@@ -20,7 +20,7 @@ const FADE_SECONDS = 8;
  * MediaSession (lock-screen controls, so playback survives a locked
  * screen) on top. Returns an exit() function that tears everything down.
  */
-export function mountSleepMode(engine, program, manifest, mix, { styleLabelFor = (id) => id } = {}) {
+export function mountSleepMode(engine, program, manifest, mix, { styleLabelFor = (id) => id, verseFilter } = {}) {
   const overlay = document.createElement("div");
   overlay.className = "sleep-overlay";
 
@@ -128,7 +128,7 @@ export function mountSleepMode(engine, program, manifest, mix, { styleLabelFor =
   // nobody and leave the Play/Pause button stuck showing "Play" while
   // actually playing.
   engine.loadProgram(program);
-  const unmountKaraoke = mountKaraoke(karaokeContainer, engine, manifest, mix);
+  const unmountKaraoke = mountKaraoke(karaokeContainer, engine, manifest, mix, verseFilter);
   const unmountControls = mountPlayerControls(controlsContainer, engine, { styleLabelFor });
   engine.play();
 

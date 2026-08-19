@@ -12,8 +12,8 @@ import { createPassageView } from "./word-stream.js";
  * meaning-bearing ones (articles, pronouns, connectives) and the words kept
  * blanked longest are the ones that actually carry the verse's content.
  */
-export function mountInvisibleWord(container, engine, manifest, mix, getRevealFraction = () => 0.15, getLengthMatched = () => false) {
-  const view = createPassageView(container, engine, manifest, mix);
+export function mountInvisibleWord(container, engine, manifest, mix, getRevealFraction = () => 0.15, getLengthMatched = () => false, verseFilter) {
+  const view = createPassageView(container, engine, manifest, mix, verseFilter);
   let revealed = new Set();
   let hinted = new Set();
 
