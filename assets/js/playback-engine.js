@@ -32,6 +32,7 @@ export function createPlaybackEngine() {
   let crossfading = false;
   let isPlaying = false;
   let rafHandle = null;
+  let masterVolume = 1; // external multiplier (e.g. sleep mode's fade-out), on top of crossfade's own volume math
 
   const listeners = { blockchange: [], timeupdate: [], ended: [], playstate: [] };
   function emit(event, ...args) {
@@ -84,14 +85,14 @@ export function createPlaybackEngine() {
 
   function advanceCrossfade(timeLeft) {
     const progress = Math.min(1, Math.max(0, 1 - timeLeft / CROSSFADE_SECONDS));
-    activeEl().volume = 1 - progress;
-    standbyEl().volume = progress;
+    activeEl().volume = (1 - progress) * masterVolume;
+    standbyEl().volume = progress * masterVolume;
   }
 
   function completeCrossfade() {
     activeEl().pause();
     activeIdx = 1 - activeIdx;
-    activeEl().volume = 1;
+    activeEl().volume = masterVolume;
     blockIndex += 1;
     crossfading = false;
     emit("blockchange", currentBlock(), blockIndex);
@@ -161,7 +162,7 @@ export function createPlaybackEngine() {
     blockIndex = index;
     crossfading = false;
     await seekAndPlay(el, block.inTime);
-    activeEl().volume = 1;
+    activeEl().volume = masterVolume;
     isPlaying = true;
     emit("blockchange", block, blockIndex);
     emit("playstate", true);
@@ -226,6 +227,21 @@ export function createPlaybackEngine() {
 
     skipToPreviousBlock() {
       if (blockIndex > 0) playFromBlock(blockIndex - 1);
+    },
+
+    /** External multiplier on top of the crossfade's own volume math -- e.g. sleep mode's fade-out. */
+    setMasterVolume(v) {
+      masterVolume = Math.min(1, Math.max(0, v));
+      if (crossfading) {
+        // Re-derive each element's crossfade progress from its current volume rather than
+        // recomputing from time, so an in-flight fade keeps its relative balance.
+        const priorTotal = activeEl().volume + standbyEl().volume;
+        const standbyShare = priorTotal > 0 ? standbyEl().volume / priorTotal : 0;
+        activeEl().volume = (1 - standbyShare) * masterVolume;
+        standbyEl().volume = standbyShare * masterVolume;
+      } else {
+        activeEl().volume = masterVolume;
+      }
     },
 
     getState() {

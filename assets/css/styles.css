@@ -549,6 +549,114 @@ main {
   outline-offset: 1px;
 }
 
+/* Sleep mode -- a deliberate, fixed night skin that does NOT follow the
+   site's light/dark theme (see plan: a Pathfinder using this at night wants
+   a dim, warm palette regardless of system theme). */
+
+body.sleep-mode-active {
+  overflow: hidden;
+}
+
+.sleep-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1.5rem clamp(1rem, 4vw, 3rem);
+  overflow-y: auto;
+  background: #05070a;
+  color: #e8d9b0;
+}
+
+.sleep-topbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-weight: 700;
+}
+
+.sleep-timer-select {
+  padding: 0.45rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid #4a3f2a;
+  background: #14100a;
+  color: #e8d9b0;
+  font-size: 0.95rem;
+}
+
+.sleep-overlay .btn.secondary {
+  border-color: #6b5a35;
+  color: #e8d9b0;
+  background: transparent;
+}
+
+.sleep-overlay .btn.secondary:hover,
+.sleep-overlay .btn.secondary:focus-visible {
+  background: rgba(232, 217, 176, 0.1);
+  outline: none;
+}
+
+.sleep-overlay .karaoke-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.sleep-overlay .karaoke-heading {
+  color: #a68a4a;
+  text-align: center;
+  font-size: 1.05rem;
+}
+
+.sleep-overlay .karaoke-stream {
+  font-size: clamp(1.4rem, 3vw, 2.1rem);
+  line-height: 2.3;
+  text-align: center;
+  max-height: none;
+  overflow: visible;
+}
+
+.sleep-overlay .karaoke-word {
+  color: #d8c48a;
+}
+
+.sleep-overlay .karaoke-word.filler {
+  opacity: 0.45;
+}
+
+.sleep-overlay .karaoke-word.sung {
+  color: #5a4f38;
+  opacity: 0.75;
+}
+
+.sleep-overlay .karaoke-word.active {
+  background: #4a3418;
+  color: #ffe9b0;
+  font-weight: 800;
+}
+
+.sleep-overlay .player-controls {
+  justify-content: center;
+  border-top: 1px solid #3a3122;
+}
+
+.sleep-overlay .player-controls .btn:not(.secondary) {
+  background: #3a2c14;
+  color: #ffe9b0;
+}
+
+.sleep-overlay .player-controls .btn:not(.secondary):hover {
+  background: #4a3a1c;
+}
+
+.sleep-overlay .player-status {
+  color: #b89b5e;
+}
+
 .site-footer {
   max-width: 1080px;
   margin: 1.3rem auto 0;

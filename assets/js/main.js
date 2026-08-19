@@ -18,6 +18,7 @@ import { mountInvisibleWord } from "./study-modes/invisible-word.js";
 import { mountBlackoutRamp } from "./study-modes/blackout-ramp.js";
 import { mountTypeAhead } from "./study-modes/type-ahead.js";
 import { mountSingAlong } from "./study-modes/sing-along.js";
+import { mountSleepMode } from "./sleep-mode.js";
 import { mountPlayerControls } from "./player-controls.js";
 
 function persistAppState(manifestUrl, selected, mix) {
@@ -218,6 +219,21 @@ function initSelectionUi(manifest, manifestUrl) {
     else unmountStudyView = mountKaraoke(karaokeView, engine);
     unmountPlayerControls = mountPlayerControls(playerControls, engine, { styleLabelFor });
     engine.play();
+  });
+
+  document.getElementById("sleepModeBtn").addEventListener("click", () => {
+    if (selected.size === 0) {
+      alert("Select at least one chapter or verse range first.");
+      return;
+    }
+    const program = buildProgram(manifest, mix, selected);
+    unmountStudyView?.();
+    unmountPlayerControls?.();
+    unmountStudyView = null;
+    unmountPlayerControls = null;
+    document.getElementById("karaokeView").innerHTML = "";
+    document.getElementById("playerControls").innerHTML = "";
+    mountSleepMode(engine, program, { styleLabelFor });
   });
 }
 
