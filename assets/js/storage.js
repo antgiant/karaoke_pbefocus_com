@@ -5,6 +5,7 @@ function defaultState() {
     schemaVersion: 1,
     manifestUrl: null,
     selectedSectionKeys: [],
+    activeStyle: null,
   };
 }
 

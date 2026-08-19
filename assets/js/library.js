@@ -22,11 +22,10 @@ export function validateManifest(manifest) {
   return manifest;
 }
 
-function passageLabel(section) {
-  const ref = section.verseStart
+export function passageLabel(section) {
+  return section.verseStart
     ? `${section.book} ${section.chapter}:${section.verseStart}-${section.verseEnd}`
     : `${section.book} ${section.chapter}`;
-  return ref;
 }
 
 /** Groups manifest.sections into a book -> ordered chapter/verse-range tree for the selection UI. */
@@ -59,6 +58,19 @@ export function buildBookTree(manifest) {
 
 export function findSection(manifest, key) {
   return manifest.sections.find((s) => sectionKey(s) === key);
+}
+
+/** manifest.sections sorted into canonical book/chapter/verse order (see buildBookTree). */
+export function orderedSections(manifest) {
+  return manifest.sections
+    .slice()
+    .sort(
+      (a, b) =>
+        bookSortIndex(a.book) - bookSortIndex(b.book) ||
+        a.book.localeCompare(b.book) ||
+        a.chapter - b.chapter ||
+        (a.verseStart ?? 0) - (b.verseStart ?? 0)
+    );
 }
 
 // Rough spoken-word-rate estimate (words/sec) used only to give the

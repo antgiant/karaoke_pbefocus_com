@@ -8,10 +8,14 @@ import {
   summarize,
   toggleKey,
 } from "./selection.js";
+import { buildProgram } from "./program-builder.js";
+import { createPlaybackEngine } from "./playback-engine.js";
+import { mountKaraoke } from "./study-modes/karaoke.js";
+import { mountPlayerControls } from "./player-controls.js";
 
-function persistSelection(manifestUrl, selected) {
+function persistAppState(manifestUrl, selected, styleId) {
   const state = loadState();
-  saveState({ ...state, manifestUrl, selectedSectionKeys: [...selected] });
+  saveState({ ...state, manifestUrl, selectedSectionKeys: [...selected], activeStyle: styleId });
 }
 
 function renderSummary(selected, manifest) {
@@ -21,7 +25,9 @@ function renderSummary(selected, manifest) {
   document.getElementById("summaryDuration").textContent = `~${formatDuration(estimatedSeconds)}`;
 }
 
-function renderBookTree(manifest, selected, manifestUrl) {
+const openBooks = new Set();
+
+function renderBookTree(manifest, selected, onChange) {
   const tree = buildBookTree(manifest);
   const container = document.getElementById("bookTree");
   container.innerHTML = "";
@@ -29,7 +35,11 @@ function renderBookTree(manifest, selected, manifestUrl) {
   for (const { book, chapters } of tree) {
     const details = document.createElement("details");
     details.className = "book-group";
-    details.open = false;
+    details.open = openBooks.has(book);
+    details.addEventListener("toggle", () => {
+      if (details.open) openBooks.add(book);
+      else openBooks.delete(book);
+    });
 
     const summary = document.createElement("summary");
     const bookCheckbox = document.createElement("input");
@@ -41,9 +51,7 @@ function renderBookTree(manifest, selected, manifestUrl) {
     bookCheckbox.addEventListener("click", (event) => {
       event.stopPropagation();
       setBookSelected(selected, chapters, event.target.checked);
-      persistSelection(manifestUrl, selected);
-      renderBookTree(manifest, selected, manifestUrl);
-      renderSummary(selected, manifest);
+      onChange();
     });
     summary.appendChild(bookCheckbox);
     summary.appendChild(document.createTextNode(` ${book}`));
@@ -59,9 +67,7 @@ function renderBookTree(manifest, selected, manifestUrl) {
       checkbox.checked = selected.has(chapter.key);
       checkbox.addEventListener("change", () => {
         toggleKey(selected, chapter.key);
-        persistSelection(manifestUrl, selected);
-        renderBookTree(manifest, selected, manifestUrl);
-        renderSummary(selected, manifest);
+        onChange();
       });
       label.appendChild(checkbox);
       label.appendChild(document.createTextNode(chapter.label));
@@ -72,26 +78,81 @@ function renderBookTree(manifest, selected, manifestUrl) {
   }
 }
 
+function renderStyleOptions(manifest, preferredStyleId) {
+  const select = document.getElementById("styleSelect");
+  select.innerHTML = "";
+  for (const style of manifest.styles) {
+    const option = document.createElement("option");
+    option.value = style.id;
+    option.textContent = style.label;
+    select.appendChild(option);
+  }
+  if (manifest.styles.some((s) => s.id === preferredStyleId)) {
+    select.value = preferredStyleId;
+  }
+  return select;
+}
+
+function renderFallbackNote(manifest, fallbacks) {
+  const note = document.getElementById("fallbackNote");
+  if (fallbacks.length === 0) {
+    note.hidden = true;
+    return;
+  }
+  const labelFor = (id) => manifest.styles.find((s) => s.id === id)?.label ?? id;
+  note.textContent =
+    "Some sections aren't available in the style you picked, so they'll play in a different style instead: " +
+    fallbacks.map((f) => `${f.label} (using ${labelFor(f.usedStyle)})`).join("; ") + ".";
+  note.hidden = false;
+}
+
 function initSelectionUi(manifest, manifestUrl) {
   const state = loadState();
-  const relevantKeys = state.manifestUrl === manifestUrl ? state.selectedSectionKeys : [];
-  const selected = createSelectionState(relevantKeys);
+  const sameLibrary = state.manifestUrl === manifestUrl;
+  const selected = createSelectionState(sameLibrary ? state.selectedSectionKeys : []);
+  const preferredStyleId = sameLibrary ? state.activeStyle : null;
+
+  function rerender() {
+    persistAppState(manifestUrl, selected, styleSelect.value);
+    renderBookTree(manifest, selected, rerender);
+    renderSummary(selected, manifest);
+  }
 
   document.getElementById("selectAllBtn").addEventListener("click", () => {
     for (const { chapters } of buildBookTree(manifest)) setBookSelected(selected, chapters, true);
-    persistSelection(manifestUrl, selected);
-    renderBookTree(manifest, selected, manifestUrl);
-    renderSummary(selected, manifest);
+    rerender();
   });
   document.getElementById("selectNoneBtn").addEventListener("click", () => {
     selected.clear();
-    persistSelection(manifestUrl, selected);
-    renderBookTree(manifest, selected, manifestUrl);
-    renderSummary(selected, manifest);
+    rerender();
   });
 
-  renderBookTree(manifest, selected, manifestUrl);
+  const styleSelect = renderStyleOptions(manifest, preferredStyleId);
+  styleSelect.addEventListener("change", () => persistAppState(manifestUrl, selected, styleSelect.value));
+
+  renderBookTree(manifest, selected, rerender);
   renderSummary(selected, manifest);
+
+  const engine = createPlaybackEngine();
+  let unmountKaraoke = null;
+  let unmountPlayerControls = null;
+
+  document.getElementById("startKaraokeBtn").addEventListener("click", () => {
+    if (selected.size === 0) {
+      renderFallbackNote(manifest, []);
+      alert("Select at least one chapter or verse range first.");
+      return;
+    }
+    const program = buildProgram(manifest, selected, styleSelect.value);
+    renderFallbackNote(manifest, program.fallbacks);
+
+    engine.loadProgram(program);
+    unmountKaraoke?.();
+    unmountPlayerControls?.();
+    unmountKaraoke = mountKaraoke(document.getElementById("karaokeView"), engine);
+    unmountPlayerControls = mountPlayerControls(document.getElementById("playerControls"), engine);
+    engine.play();
+  });
 }
 
 initGate({

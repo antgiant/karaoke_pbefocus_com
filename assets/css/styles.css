@@ -310,6 +310,94 @@ main {
   font-weight: 700;
 }
 
+/* Study setup + karaoke */
+
+.style-select-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.style-select-row select {
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+.fallback-note {
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid rgba(179, 38, 30, 0.3);
+  border-radius: 8px;
+  background: rgba(179, 38, 30, 0.06);
+  color: var(--danger);
+  font-size: 0.9rem;
+}
+
+.player-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 1.1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.player-status {
+  font-weight: 700;
+  color: var(--teal-dark);
+  font-size: 0.95rem;
+}
+
+.karaoke-view {
+  padding-top: 0.25rem;
+}
+
+.karaoke-heading {
+  margin: 0 0 1rem;
+  color: var(--teal-dark);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.karaoke-stream {
+  font-size: 1.4rem;
+  line-height: 2.1;
+  max-height: 45vh;
+  overflow-y: auto;
+}
+
+.karaoke-word {
+  display: inline-block;
+  padding: 0.05rem 0.2rem;
+  border-radius: 5px;
+  transition: color 0.15s ease, background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.karaoke-word.filler {
+  font-size: 0.8em;
+  font-style: italic;
+  opacity: 0.65;
+}
+
+.karaoke-word.sung {
+  color: #6f8a8a;
+  opacity: 0.7;
+}
+
+.karaoke-word.active {
+  background: var(--teal);
+  color: #fff;
+  font-weight: 800;
+}
+
 .site-footer {
   max-width: 1080px;
   margin: 1.3rem auto 0;
@@ -394,6 +482,25 @@ main {
 
   .chapter-check:hover {
     background: rgba(99, 199, 207, 0.1);
+  }
+
+  .style-select-row select {
+    background: #0d1f28;
+    color: var(--ink);
+    border-color: var(--line);
+  }
+
+  .fallback-note {
+    background: rgba(255, 138, 128, 0.12);
+    border-color: rgba(255, 138, 128, 0.4);
+  }
+
+  .player-controls {
+    border-top: 1px solid var(--line);
+  }
+
+  .karaoke-word.sung {
+    color: #4c6b6b;
   }
 
   .site-footer {
