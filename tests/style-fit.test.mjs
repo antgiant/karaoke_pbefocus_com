@@ -19,12 +19,12 @@ test("churchFitEmoji: unrecognized/missing value degrades to empty string rather
 });
 
 test("churchFitText: fixed value pairs the emoji with its plain-language phrase", () => {
-  assert.equal(churchFitText("great-match"), "😇 Great match for church");
-  assert.equal(churchFitText("very-uncomfortable"), "😱 A big departure for church");
+  assert.equal(churchFitText("great-match"), "😇 Great match for singing in church");
+  assert.equal(churchFitText("very-uncomfortable"), "😱 A big departure for singing in church");
 });
 
 test("churchFitText: a range reads as 'Varies', not one specific phrase", () => {
-  assert.equal(churchFitText(["very-uncomfortable", "great-match"]), "😱😇 Varies for church");
+  assert.equal(churchFitText(["very-uncomfortable", "great-match"]), "😱😇 Varies for singing in church");
 });
 
 test("churchFitText: degrades to empty string for a missing/unrecognized value", () => {
@@ -32,7 +32,7 @@ test("churchFitText: degrades to empty string for a missing/unrecognized value",
 });
 
 test("churchFitDescription: fixed value returns just its phrase", () => {
-  assert.equal(churchFitDescription("nervous"), "A bit of a stretch for church");
+  assert.equal(churchFitDescription("nervous"), "A bit of a stretch for singing in church");
 });
 
 test("churchFitDescription: a range explains both ends in plain language", () => {
