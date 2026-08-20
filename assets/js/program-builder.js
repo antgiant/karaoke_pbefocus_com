@@ -1,5 +1,5 @@
 import { alignWordsToCanonical, canonicalWords, orderedSections, passageLabel, pickRecording, sectionKey } from "./library.js";
-import { getRuns } from "./mix.js";
+import { getRuns, getTakeRank } from "./mix.js";
 
 const FALLBACK_STYLE_ID = "default";
 
@@ -58,7 +58,7 @@ export function buildProgram(manifest, mix, selectedKeys, verseFilter) {
     const alignmentCache = new Map(); // styleId -> { recording, aligned } | null
     function alignmentFor(styleId) {
       if (alignmentCache.has(styleId)) return alignmentCache.get(styleId);
-      const recording = pickRecording(section, styleId);
+      const recording = pickRecording(section, styleId, getTakeRank(mix, key, styleId));
       const result = recording ? { recording, aligned: alignWordsToCanonical(canonical, recording.words) } : null;
       alignmentCache.set(styleId, result);
       return result;

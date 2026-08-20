@@ -4,15 +4,59 @@ import { getRuns } from "../mix.js";
 import { wordIndexAtTime } from "../playback-engine.js";
 import { stripTrailingVerseAnnouncement } from "./number-words.js";
 
+// How many words make up one displayed line -- modeled on a typical karaoke
+// line length (short enough to read at a glance, long enough to not feel
+// choppy). A line never spans two verses even if that leaves it shorter
+// than this (see buildLines) -- scripture verse boundaries are meaningful
+// to a Pathfinder, a mid-verse line break isn't.
+export const WORDS_PER_LINE = 8;
+
+// Must match the CSS transition duration on .karaoke-line-group (styles.css)
+// -- kept as one constant here so the JS timeout that removes the outgoing
+// group and the CSS animation it's timed against can't drift apart.
+export const LINE_TRANSITION_MS = 300;
+
+/**
+ * Splits a section's canonical words into fixed-size, verse-respecting
+ * lines for the windowed karaoke display (see createPassageView below).
+ * Verses outside `allowedVerses` (the per-chapter verse-filter narrowing)
+ * are skipped entirely -- their words never become part of any line, the
+ * same "just don't address it" treatment the old full-passage view gave
+ * hidden verses.
+ *
+ * Returns { lines, lineOfIndex } where lines[n] = {verse, isVerseStart,
+ * indices: number[]} (canonical indices, in order) and lineOfIndex is a
+ * canonicalIndex -> line-number Map for O(1) lookup during playback.
+ */
+export function buildLines(canonical, allowedVerses, wordsPerLine = WORDS_PER_LINE) {
+  const lines = [];
+  const lineOfIndex = new Map();
+  let currentVerse = null;
+  let currentLine = null;
+
+  canonical.forEach((w, i) => {
+    if (allowedVerses && !allowedVerses.has(w.verse)) return;
+    const verseChanged = w.verse !== currentVerse;
+    if (currentLine === null || verseChanged || currentLine.indices.length >= wordsPerLine) {
+      currentVerse = w.verse;
+      currentLine = { verse: w.verse, isVerseStart: verseChanged, indices: [] };
+      lines.push(currentLine);
+    }
+    currentLine.indices.push(i);
+    lineOfIndex.set(i, lines.length - 1);
+  });
+
+  return { lines, lineOfIndex };
+}
+
 /**
  * Shared renderer for every engine-driven study mode (karaoke,
- * disappearing-word, invisible-word, blackout-ramp, sing-along): always
- * shows the *complete* passage for the currently active section -- grouped
- * into verses with verse-number markers, like a printed Bible -- rather
- * than just whatever word range the currently-playing audio block happens
- * to cover. For a mixed-genre section that means words from parts not
- * currently playing are still shown, tinted by whichever style they're
- * assigned to.
+ * disappearing-word, invisible-word, blackout-ramp, sing-along): a
+ * windowed, 2-line karaoke display (current line + a dimmed preview of the
+ * next one) modeled on standard karaoke players -- not the whole passage
+ * at once. This is what keeps a long passage from fighting a Pathfinder's
+ * ability to interact with the page: there's nothing to scroll past
+ * anymore, since only one line's worth of words is ever the "active" one.
  *
  * Word-to-canonical-index mapping is NOT recomputed here -- it's read
  * directly off each program block's `canonicalIndexMap` (built once in
@@ -29,12 +73,22 @@ import { stripTrailingVerseAnnouncement } from "./number-words.js";
  *
  * Spoken filler (chapter titles, spoken verse-number callouts -- anything
  * not part of the canonical/addressable text) belongs to whichever
- * recording is actually playing, so it's shown only for the currently
- * active block, inserted right before wherever it falls and removed again
- * when a different block becomes active.
+ * recording is actually playing. It's only shown when its anchor word is
+ * in the currently-displayed window -- filler tied to a line that's not on
+ * screen right now is simply not shown, the same as any other off-window
+ * content.
+ *
+ * A Pathfinder can also step through lines manually (Previous/Next
+ * buttons) independent of playback -- doing so pauses the engine, so
+ * browsing never fights what's actually playing. Resuming playback lets
+ * the normal timeupdate-driven highlight() take back over on its own.
  *
  * Each mode supplies renderWord()/onPastWord() to customize how a word
- * looks without needing to know any of this section/mix/seeking plumbing.
+ * looks without needing to know any of this section/mix/seeking/windowing
+ * plumbing. Both are only ever invoked for words in the currently-rendered
+ * window, not the whole passage -- masking modes (invisible-word,
+ * blackout-ramp) naturally end up with less to compute per call than they
+ * did against a full passage.
  */
 export function createPassageView(container, engine, manifest, mix, verseFilter) {
   container.innerHTML = "";
@@ -42,8 +96,25 @@ export function createPassageView(container, engine, manifest, mix, verseFilter)
   const heading = document.createElement("p");
   heading.className = "karaoke-heading";
   const stream = document.createElement("div");
-  stream.className = "karaoke-stream";
-  container.append(heading, stream);
+  // karaoke-window (not just karaoke-stream) so its clipping/fixed-height
+  // CSS doesn't also hit type-ahead.js's own unrelated, non-windowed reuse
+  // of .karaoke-stream for its growing multi-word display.
+  stream.className = "karaoke-stream karaoke-window";
+  const nav = document.createElement("div");
+  nav.className = "karaoke-line-nav";
+  nav.hidden = true;
+  const prevBtn = document.createElement("button");
+  prevBtn.type = "button";
+  prevBtn.className = "btn tiny";
+  prevBtn.textContent = "‹ Previous line";
+  prevBtn.setAttribute("aria-label", "Previous line (pauses playback)");
+  const nextBtn = document.createElement("button");
+  nextBtn.type = "button";
+  nextBtn.className = "btn tiny";
+  nextBtn.textContent = "Next line ›";
+  nextBtn.setAttribute("aria-label", "Next line (pauses playback)");
+  nav.append(prevBtn, nextBtn);
+  container.append(heading, stream, nav);
 
   let renderWordFn = (w) => ({ text: w.word });
   let onPastWordFn = null;
@@ -51,11 +122,17 @@ export function createPassageView(container, engine, manifest, mix, verseFilter)
 
   let currentSectionKey = null;
   let canonical = [];
-  let wordEls = [];
+  let lines = [];
+  let lineOfIndex = new Map();
+  let displayedLineIndex = null;
+  let wordEls = []; // sparse, canonical.length-sized: only currently-rendered indices are non-null
+  let renderedIndices = []; // canonical indices in the current window (current + next line), for highlight()
   let location = []; // location[i] = {programIndex, time} | null, for click-to-seek
   let lastActiveIndex = -1;
   let activeFillerBlock = null;
   let fillerEls = [];
+  let outgoingGroup = null;
+  let outgoingTimer = null;
 
   function colorsForSection(sectionKey) {
     if (!mix) return null;
@@ -81,73 +158,130 @@ export function createPassageView(container, engine, manifest, mix, verseFilter)
     return map;
   }
 
+  let colors = null;
+
+  function buildWordSpan(i) {
+    const w = canonical[i];
+    const { text, extraClass } = renderWordFn(w, i);
+    const span = document.createElement("span");
+    span.className = "karaoke-word" + (extraClass ? ` ${extraClass}` : "");
+    span.textContent = `${text} `;
+
+    const loc = location[i];
+    if (loc) {
+      span.classList.add("clickable");
+      span.tabIndex = 0;
+      span.setAttribute("role", "button");
+      span.setAttribute("aria-label", `Jump playback to "${w.word}"`);
+      const seek = () => engine.skipToBlock(loc.programIndex, loc.time);
+      span.addEventListener("click", seek);
+      span.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          seek();
+        }
+      });
+    }
+
+    if (colors && colors[i]) {
+      span.classList.add("genre-colored");
+      span.style.setProperty("--word-color", colorForStyle(colors[i], manifest.styles));
+    }
+
+    wordEls[i] = span;
+    return span;
+  }
+
+  /** Builds one .karaoke-line element (a verse-num marker if this line starts a new verse, then its words). */
+  function buildLineElement(lineIndex, roleClass) {
+    const line = lines[lineIndex];
+    const el = document.createElement("p");
+    el.className = `karaoke-line ${roleClass}`;
+    if (line.isVerseStart) {
+      const num = document.createElement("sup");
+      num.className = "verse-num";
+      num.textContent = String(line.verse);
+      el.appendChild(num);
+    }
+    for (const i of line.indices) el.appendChild(buildWordSpan(i));
+    return el;
+  }
+
+  function updateNavButtons() {
+    nav.hidden = lines.length === 0;
+    prevBtn.disabled = displayedLineIndex === null || displayedLineIndex <= 0;
+    nextBtn.disabled = displayedLineIndex === null || displayedLineIndex >= lines.length - 1;
+  }
+
+  /** Swaps the displayed window to start at `lineIndex` (current line) + `lineIndex + 1` (preview). */
+  function showWindow(lineIndex, { animate }) {
+    if (lines.length === 0) {
+      displayedLineIndex = null;
+      renderedIndices = [];
+      updateNavButtons();
+      return;
+    }
+    const clamped = Math.min(Math.max(lineIndex, 0), lines.length - 1);
+    if (clamped === displayedLineIndex) return;
+
+    if (outgoingTimer !== null) {
+      clearTimeout(outgoingTimer);
+      outgoingGroup?.remove();
+      outgoingTimer = null;
+      outgoingGroup = null;
+    }
+
+    const previousGroup = animate ? stream.firstElementChild : null;
+
+    const group = document.createElement("div");
+    group.className = "karaoke-line-group";
+    group.append(
+      buildLineElement(clamped, "current-line"),
+      ...(clamped + 1 < lines.length ? [buildLineElement(clamped + 1, "next-line")] : [])
+    );
+
+    displayedLineIndex = clamped;
+    renderedIndices = [...lines[clamped].indices, ...(lines[clamped + 1]?.indices ?? [])];
+    lastActiveIndex = -1; // force the next highlight() call to re-toggle .active/onPastWord on the new elements
+
+    if (previousGroup) {
+      previousGroup.classList.add("leaving");
+      outgoingGroup = previousGroup;
+      outgoingTimer = setTimeout(() => {
+        previousGroup.remove();
+        outgoingGroup = null;
+        outgoingTimer = null;
+      }, LINE_TRANSITION_MS);
+      stream.appendChild(group);
+    } else {
+      stream.innerHTML = "";
+      stream.appendChild(group);
+    }
+
+    updateNavButtons();
+  }
+
   function renderSection(sectionKey) {
     currentSectionKey = sectionKey;
     const section = findSection(manifest, sectionKey);
     canonical = section ? canonicalWords(section) : [];
     location = section ? buildLocationMap(sectionKey) : [];
-    const colors = section ? colorsForSection(sectionKey) : null;
+    colors = section ? colorsForSection(sectionKey) : null;
     lastActiveIndex = -1;
     activeFillerBlock = null;
     fillerEls = [];
+    wordEls = new Array(canonical.length).fill(null);
+
+    const allowedVerses = verseFilter?.get(sectionKey) ?? null;
+    const built = buildLines(canonical, allowedVerses);
+    lines = built.lines;
+    lineOfIndex = built.lineOfIndex;
+    displayedLineIndex = null;
 
     heading.textContent = section ? passageLabel(section) : "";
-    stream.innerHTML = "";
-    wordEls = [];
     onSectionChangeFn?.(section, canonical);
 
-    // A section studied with a narrowed verse range still has its complete
-    // canonical word list here (indices must stay aligned with every block's
-    // canonicalIndexMap, which is built against the full recording) -- verses
-    // outside the filter are hidden rather than excluded from `canonical`,
-    // so they simply never get audio (buildProgram already leaves them out
-    // of every block) while everything else here stays untouched.
-    const allowedVerses = verseFilter?.get(sectionKey) ?? null;
-
-    let openVerse;
-    let verseEl = null;
-    canonical.forEach((w, i) => {
-      if (verseEl === null || w.verse !== openVerse) {
-        openVerse = w.verse;
-        verseEl = document.createElement("p");
-        verseEl.className = "karaoke-verse";
-        verseEl.hidden = allowedVerses ? !allowedVerses.has(openVerse) : false;
-        const num = document.createElement("sup");
-        num.className = "verse-num";
-        num.textContent = String(openVerse);
-        verseEl.appendChild(num);
-        stream.appendChild(verseEl);
-      }
-
-      const { text, extraClass } = renderWordFn(w, i);
-      const span = document.createElement("span");
-      span.className = "karaoke-word" + (extraClass ? ` ${extraClass}` : "");
-      span.textContent = `${text} `;
-
-      const loc = location[i];
-      if (loc) {
-        span.classList.add("clickable");
-        span.tabIndex = 0;
-        span.setAttribute("role", "button");
-        span.setAttribute("aria-label", `Jump playback to "${w.word}"`);
-        const seek = () => engine.skipToBlock(loc.programIndex, loc.time);
-        span.addEventListener("click", seek);
-        span.addEventListener("keydown", (event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            seek();
-          }
-        });
-      }
-
-      if (colors && colors[i]) {
-        span.classList.add("genre-colored");
-        span.style.setProperty("--word-color", colorForStyle(colors[i], manifest.styles));
-      }
-
-      verseEl.appendChild(span);
-      wordEls.push(span);
-    });
+    showWindow(0, { animate: false });
   }
 
   function clearFiller() {
@@ -155,7 +289,7 @@ export function createPassageView(container, engine, manifest, mix, verseFilter)
     fillerEls = [];
   }
 
-  /** Shows the spoken filler actually present in the currently-playing block, positioned right before wherever it falls in the passage. */
+  /** Shows the spoken filler actually present in the currently-playing block, positioned right before wherever it falls in the passage -- only for anchor words in the currently-rendered window; filler for an off-window word just isn't shown. */
   function updateFillerForBlock(block) {
     if (block === activeFillerBlock) return;
     clearFiller();
@@ -202,28 +336,33 @@ export function createPassageView(container, engine, manifest, mix, verseFilter)
 
   function highlight(canonicalIndex) {
     if (canonicalIndex === lastActiveIndex) return;
-    for (let i = 0; i < wordEls.length; i++) {
+
+    if (canonicalIndex >= 0) {
+      const targetLine = lineOfIndex.get(canonicalIndex);
+      if (targetLine !== undefined && targetLine !== displayedLineIndex) {
+        showWindow(targetLine, { animate: true });
+      }
+    }
+
+    for (const i of renderedIndices) {
       const isPast = i < canonicalIndex;
       wordEls[i].classList.toggle("active", i === canonicalIndex);
       if (onPastWordFn) onPastWordFn(wordEls[i], isPast, i, canonical[i], canonicalIndex);
       else wordEls[i].classList.toggle("sung", isPast);
     }
-    // Only nudge the scroll position when the active word has actually left
-    // the visible area -- scrolling on every single word (this fires roughly
-    // once per second during playback) would otherwise fight a Pathfinder
-    // trying to manually scroll or click elsewhere in the passage while
-    // audio keeps playing.
-    if (canonicalIndex >= 0 && wordEls[canonicalIndex] && !isReasonablyInView(wordEls[canonicalIndex])) {
-      wordEls[canonicalIndex].scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
-    }
     lastActiveIndex = canonicalIndex;
   }
 
-  function isReasonablyInView(el) {
-    const rect = el.getBoundingClientRect();
-    const margin = window.innerHeight * 0.15;
-    return rect.top >= margin && rect.bottom <= window.innerHeight - margin;
-  }
+  prevBtn.addEventListener("click", () => {
+    if (displayedLineIndex === null) return;
+    engine.pause();
+    showWindow(displayedLineIndex - 1, { animate: true });
+  });
+  nextBtn.addEventListener("click", () => {
+    if (displayedLineIndex === null) return;
+    engine.pause();
+    showWindow(displayedLineIndex + 1, { animate: true });
+  });
 
   const unsubscribers = [
     engine.on("blockchange", (block) => {
@@ -259,12 +398,13 @@ export function createPassageView(container, engine, manifest, mix, verseFilter)
     getCanonical() {
       return canonical;
     },
-    /** Toggles a class on a specific canonical-index word, independent of playback position (e.g. sing-along hit/miss). */
+    /** Toggles a class on a specific canonical-index word, independent of playback position (e.g. sing-along hit/miss). No-ops if that word isn't in the currently-displayed window. */
     markWord(index, className, on = true) {
       wordEls[index]?.classList.toggle(className, on);
     },
     unmount() {
       for (const off of unsubscribers) off();
+      if (outgoingTimer !== null) clearTimeout(outgoingTimer);
     },
   };
 }

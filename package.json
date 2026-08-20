@@ -1,0 +1,12 @@
+{
+  "name": "pbe-karaoke",
+  "private": true,
+  "type": "module",
+  "description": "PBE Karaoke -- scripture-song karaoke study app (static site, no build step). This package.json exists only to run the test suite; the app itself ships as plain HTML/CSS/JS, see README.md.",
+  "scripts": {
+    "test": "node --test tests/**/*.test.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1"
+  }
+}

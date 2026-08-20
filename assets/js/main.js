@@ -1,6 +1,8 @@
 import { buildBookTree, formatDuration, formatVerseRanges } from "./library.js";
+import { churchFitText } from "./style-fit.js";
 import { initGate } from "./gate.js";
-import { loadState, saveState } from "./storage.js";
+import { loadState, saveState, SCHEMA_VERSION } from "./storage.js";
+import { MANIFEST_URL_PARAM, PLAYLIST_URL_PARAM } from "./constants.js";
 import {
   bookSelectionState,
   createSelectionState,
@@ -12,29 +14,59 @@ import {
   summarize,
   toggleKey,
 } from "./selection.js";
-import { createMix, fromSerializable, setDefaultStyle, syncMixToSelection, toSerializable } from "./mix.js";
+import { createMix, fromSerializable, setDefaultStyle, setDefaultTakeRank, syncMixToSelection, toSerializable } from "./mix.js";
+import { createPlaylistRecord, defaultStudyOptions, findPlaylist, renamePlaylist, duplicatePlaylist, deletePlaylist } from "./playlists.js";
+import {
+  serializePlaylistForShare,
+  deserializePlaylistFromShare,
+  encodePlaylistPayload,
+  decodePlaylistPayload,
+  encodedByteLength,
+  QR_SAFE_BYTE_LIMIT,
+} from "./share.js";
+import { renderQrCodeSvg } from "./qr.js";
 import { mountMixEditor } from "./mix-editor.js";
 import { buildProgram } from "./program-builder.js";
 import { createPlaybackEngine } from "./playback-engine.js";
-import { mountKaraoke } from "./study-modes/karaoke.js";
-import { mountDisappearingWord } from "./study-modes/disappearing-word.js";
-import { mountInvisibleWord } from "./study-modes/invisible-word.js";
-import { mountBlackoutRamp } from "./study-modes/blackout-ramp.js";
+import { mountUnscored } from "./study-modes/unscored.js";
 import { mountTypeAhead } from "./study-modes/type-ahead.js";
-import { mountSingAlong } from "./study-modes/sing-along.js";
+import { mountSingAlong, isSingAlongSupported } from "./study-modes/sing-along.js";
 import { mountSleepMode } from "./sleep-mode.js";
 import { mountPlayerControls } from "./player-controls.js";
 
-function persistAppState(manifestUrl, selected, verseSelections, mix) {
-  const state = loadState();
-  saveState({
-    ...state,
-    manifestUrl,
-    selectedSectionKeys: [...selected],
-    verseSelections: serializeVerseSelections(verseSelections),
-    activeStyle: mix.defaultStyleId,
-    mix: toSerializable(mix),
-  });
+/** A shared-playlist payload -> a fresh playlist record (no id assigned by the payload; the importer always gets a new one, same as any other new playlist). */
+function recordFromSharedPayload(payload) {
+  const shared = deserializePlaylistFromShare(payload);
+  const record = createPlaylistRecord(shared.name);
+  record.selectedSectionKeys = shared.selectedSectionKeys;
+  record.verseSelections = shared.verseSelections;
+  record.activeStyle = shared.activeStyle;
+  record.mix = shared.mix;
+  if (shared.studyOptions) record.studyOptions = shared.studyOptions;
+  return record;
+}
+
+/**
+ * Imports a playlist from `?playlist=<encoded>` in the address bar, if
+ * present -- consumed once: the param is stripped from the URL immediately
+ * either way, so a refresh doesn't re-import the same link repeatedly. If
+ * the sharer also bundled library access, that rode in as a normal
+ * `?library=` param alongside this one (see the share dialog wiring below)
+ * and gate.js's existing auto-unlock already picked it up unmodified --
+ * this only ever needs to deal with the playlist half.
+ */
+function tryImportPlaylistFromUrl() {
+  const url = new URL(window.location.href);
+  const encoded = url.searchParams.get(PLAYLIST_URL_PARAM);
+  if (!encoded) return null;
+  url.searchParams.delete(PLAYLIST_URL_PARAM);
+  window.history.replaceState(null, "", url.toString());
+  try {
+    return recordFromSharedPayload(decodePlaylistPayload(encoded));
+  } catch (e) {
+    alert(`Couldn't import the shared playlist from this link: ${e.message}`);
+    return null;
+  }
 }
 
 function renderSummary(selected, manifest, verseSelections) {
@@ -229,7 +261,14 @@ function renderStyleOptions(manifest, selectedStyleId) {
   for (const style of manifest.styles) {
     const option = document.createElement("option");
     option.value = style.id;
-    option.textContent = style.label;
+    // "<vibe emoji> <label> — <church-fit emoji + phrase>" -- self-contained
+    // plain text (see AI_TODO.md item 7): a native <option> can't carry a
+    // separate tooltip, so both pieces of signal have to live in the text
+    // itself. Degrades to just the label if a style has no emoji/churchFit
+    // (e.g. a manifest built before this field existed).
+    const vibe = style.emoji ? `${style.emoji} ` : "";
+    const fit = style.churchFit ? ` — ${churchFitText(style.churchFit)}` : "";
+    option.textContent = `${vibe}${style.label}${fit}`;
     select.appendChild(option);
   }
   select.value = selectedStyleId;
@@ -253,14 +292,63 @@ function renderFallbackNote(manifest, fallbacks) {
 function initSelectionUi(manifest, manifestUrl) {
   const state = loadState();
   const sameLibrary = state.manifestUrl === manifestUrl;
-  const selected = createSelectionState(sameLibrary ? state.selectedSectionKeys : []);
-  const verseSelections = createVerseSelections(sameLibrary ? state.verseSelections : {});
+  const playlists = sameLibrary && state.playlists.length ? state.playlists : [createPlaylistRecord("My Playlist")];
+  let activePlaylistId =
+    sameLibrary && findPlaylist(playlists, state.activePlaylistId) ? state.activePlaylistId : playlists[0].id;
 
-  const initialStyleId = (sameLibrary && state.activeStyle) || manifest.styles[0].id;
-  const mix = sameLibrary && state.mix ? fromSerializable(state.mix, manifest) : createMix(initialStyleId);
-  syncMixToSelection(mix, manifest, selected);
+  const importedRecord = tryImportPlaylistFromUrl();
+  if (importedRecord) {
+    playlists.push(importedRecord);
+    activePlaylistId = importedRecord.id;
+  }
+
+  // Live, in-memory working copies of the active playlist's data -- same
+  // shapes (Set/Map/mix-with-a-Map) the app always used for "the
+  // selection," just rebuilt from whichever playlist record is active
+  // instead of built once at startup. Reassigned wholesale by
+  // loadActivePlaylistIntoMemory() on every playlist switch; every
+  // handler below reads these `let` bindings directly (not a destructured
+  // copy), so a reassignment is visible everywhere without extra plumbing.
+  let selected, verseSelections, mix;
+
+  function loadActivePlaylistIntoMemory() {
+    const record = findPlaylist(playlists, activePlaylistId);
+    selected = createSelectionState(record.selectedSectionKeys);
+    verseSelections = createVerseSelections(record.verseSelections);
+    const initialStyleId = record.activeStyle || manifest.styles[0].id;
+    mix = record.mix ? fromSerializable(record.mix, manifest) : createMix(initialStyleId);
+    syncMixToSelection(mix, manifest, selected);
+  }
+  loadActivePlaylistIntoMemory();
+
+  /**
+   * Writes the in-memory selection/verseSelections/mix -- and the Karaoke
+   * Mode controls declared further down (hintLevelInput/rampCheckbox/
+   * lengthMatchedCheckbox/scoredCheckbox/scoredInputSelect) -- back into the
+   * active playlist's record and persists the whole collection. Safe to
+   * reference those later-declared consts here: this function is only ever
+   * *called* from event handlers (after the whole synchronous setup below
+   * has finished and they're assigned), never during initial setup itself.
+   */
+  function persistActivePlaylist() {
+    const record = findPlaylist(playlists, activePlaylistId);
+    record.selectedSectionKeys = [...selected];
+    record.verseSelections = serializeVerseSelections(verseSelections);
+    record.activeStyle = mix.defaultStyleId;
+    record.mix = toSerializable(mix);
+    record.studyOptions = {
+      blankPercent: Math.min(100, Math.max(0, Number(hintLevelInput.value) || 0)),
+      rampOnRepeat: rampCheckbox.checked,
+      lengthMatched: lengthMatchedCheckbox.checked,
+      scored: scoredCheckbox.checked,
+      scoredInput: scoredInputSelect.value,
+    };
+    saveState({ schemaVersion: SCHEMA_VERSION, manifestUrl, playlists, activePlaylistId });
+  }
 
   const styleSelect = renderStyleOptions(manifest, mix.defaultStyleId);
+  const defaultTakeCheckbox = document.getElementById("defaultTakeCheckbox");
+  defaultTakeCheckbox.checked = (mix.defaultTakeRank ?? 0) > 0;
   const mixEditorContainer = document.getElementById("mixEditor");
   const toggleMixEditorBtn = document.getElementById("toggleMixEditorBtn");
   let mixEditorHandle = null;
@@ -270,13 +358,13 @@ function initSelectionUi(manifest, manifestUrl) {
     mixEditorHandle = null;
     if (mixEditorContainer.hidden) return;
     mixEditorHandle = mountMixEditor(mixEditorContainer, manifest, mix, selected, () => {
-      persistAppState(manifestUrl, selected, verseSelections, mix);
+      persistActivePlaylist();
     });
   }
 
   function rerender() {
     syncMixToSelection(mix, manifest, selected);
-    persistAppState(manifestUrl, selected, verseSelections, mix);
+    persistActivePlaylist();
     renderBookTree(manifest, selected, verseSelections, rerender);
     renderSummary(selected, manifest, verseSelections);
     renderMixEditorIfOpen();
@@ -299,35 +387,254 @@ function initSelectionUi(manifest, manifestUrl) {
 
   styleSelect.addEventListener("change", () => {
     setDefaultStyle(mix, styleSelect.value);
-    persistAppState(manifestUrl, selected, verseSelections, mix);
+    persistActivePlaylist();
     renderMixEditorIfOpen();
+  });
+
+  defaultTakeCheckbox.addEventListener("change", () => {
+    setDefaultTakeRank(mix, defaultTakeCheckbox.checked ? 1 : 0);
+    persistActivePlaylist();
+    renderMixEditorIfOpen(); // section-level take controls with no override of their own follow this default
   });
 
   renderBookTree(manifest, selected, verseSelections, rerender);
   renderSummary(selected, manifest, verseSelections);
 
+  // --- Playlist switcher: create / rename / duplicate / delete / select active ---
+  const playlistSelect = document.getElementById("playlistSelect");
+
+  function renderPlaylistSelect() {
+    playlistSelect.innerHTML = "";
+    for (const p of playlists) {
+      const option = document.createElement("option");
+      option.value = p.id;
+      option.textContent = p.name;
+      playlistSelect.appendChild(option);
+    }
+    playlistSelect.value = activePlaylistId;
+  }
+
+  /** Persists whatever's currently in memory into its playlist first, then switches the active playlist and re-renders everything that depends on it. */
+  function switchToPlaylist(id) {
+    if (id !== activePlaylistId) persistActivePlaylist();
+    activePlaylistId = id;
+    loadActivePlaylistIntoMemory();
+    styleSelect.value = mix.defaultStyleId; // same manifest/style list across playlists -- just move the selection
+    defaultTakeCheckbox.checked = (mix.defaultTakeRank ?? 0) > 0;
+    syncStudyOptionsFromActivePlaylist();
+    renderPlaylistSelect();
+    renderBookTree(manifest, selected, verseSelections, rerender);
+    renderSummary(selected, manifest, verseSelections);
+    renderMixEditorIfOpen();
+    persistActivePlaylist(); // record the new activePlaylistId itself
+  }
+
+  renderPlaylistSelect();
+  playlistSelect.addEventListener("change", () => switchToPlaylist(playlistSelect.value));
+
+  document.getElementById("newPlaylistBtn").addEventListener("click", () => {
+    const defaultName = `Playlist ${playlists.length + 1}`;
+    const name = prompt("Name this playlist:", defaultName);
+    if (name === null) return; // cancelled
+    const record = createPlaylistRecord(name.trim() || defaultName);
+    playlists.push(record);
+    switchToPlaylist(record.id);
+  });
+
+  document.getElementById("renamePlaylistBtn").addEventListener("click", () => {
+    const current = findPlaylist(playlists, activePlaylistId);
+    const name = prompt("Rename this playlist:", current.name);
+    if (name === null) return;
+    renamePlaylist(playlists, activePlaylistId, name);
+    renderPlaylistSelect();
+    persistActivePlaylist();
+  });
+
+  document.getElementById("duplicatePlaylistBtn").addEventListener("click", () => {
+    persistActivePlaylist(); // the copy should reflect the latest in-memory edits, not the last-saved snapshot
+    const copy = duplicatePlaylist(playlists, activePlaylistId);
+    if (copy) switchToPlaylist(copy.id);
+  });
+
+  document.getElementById("deletePlaylistBtn").addEventListener("click", () => {
+    const current = findPlaylist(playlists, activePlaylistId);
+    if (!confirm(`Delete "${current.name}"? This can't be undone.`)) return;
+    activePlaylistId = deletePlaylist(playlists, activePlaylistId);
+    loadActivePlaylistIntoMemory();
+    styleSelect.value = mix.defaultStyleId;
+    defaultTakeCheckbox.checked = (mix.defaultTakeRank ?? 0) > 0;
+    syncStudyOptionsFromActivePlaylist();
+    renderPlaylistSelect();
+    renderBookTree(manifest, selected, verseSelections, rerender);
+    renderSummary(selected, manifest, verseSelections);
+    renderMixEditorIfOpen();
+    persistActivePlaylist();
+  });
+
+  // --- Sharing: link/QR (tiered by payload size) or a downloadable file, with an explicit per-share privacy choice -- see AI_TODO.md item 5 ---
+  const shareDialog = document.getElementById("shareDialog");
+  const shareDialogPlaylistName = document.getElementById("shareDialogPlaylistName");
+  const shareIncludeLibraryCheckbox = document.getElementById("shareIncludeLibraryCheckbox");
+  const shareLinkInput = document.getElementById("shareLinkInput");
+  const shareLinkRow = shareLinkInput.closest(".style-select-row");
+  const copyShareLinkBtn = document.getElementById("copyShareLinkBtn");
+  const shareQrContainer = document.getElementById("shareQrContainer");
+  const shareFileNote = document.getElementById("shareFileNote");
+  const downloadShareFileBtn = document.getElementById("downloadShareFileBtn");
+
+  function currentSharePayload() {
+    persistActivePlaylist(); // share whatever's actually selected right now, not a stale snapshot
+    const record = findPlaylist(playlists, activePlaylistId);
+    return serializePlaylistForShare(record, {
+      includeManifestUrl: shareIncludeLibraryCheckbox.checked,
+      manifestUrl,
+    });
+  }
+
+  function updateShareDialog() {
+    const payload = currentSharePayload();
+    const fitsQr = encodedByteLength(payload) <= QR_SAFE_BYTE_LIMIT;
+
+    shareLinkRow.hidden = !fitsQr;
+    shareQrContainer.hidden = !fitsQr;
+    shareFileNote.hidden = fitsQr;
+
+    if (!fitsQr) {
+      shareQrContainer.innerHTML = "";
+      shareFileNote.textContent =
+        "This playlist's custom genre mix is too large for a reliable link/QR code -- download it as a file and share that instead.";
+      return;
+    }
+
+    const url = new URL(window.location.href);
+    url.search = "";
+    if (shareIncludeLibraryCheckbox.checked && manifestUrl) url.searchParams.set(MANIFEST_URL_PARAM, manifestUrl);
+    url.searchParams.set(PLAYLIST_URL_PARAM, encodePlaylistPayload(payload));
+    const link = url.toString();
+    shareLinkInput.value = link;
+    shareQrContainer.innerHTML = renderQrCodeSvg(link);
+  }
+
+  document.getElementById("sharePlaylistBtn").addEventListener("click", () => {
+    shareDialogPlaylistName.textContent = findPlaylist(playlists, activePlaylistId).name;
+    shareIncludeLibraryCheckbox.checked = false;
+    updateShareDialog();
+    shareDialog.showModal();
+  });
+  shareIncludeLibraryCheckbox.addEventListener("change", updateShareDialog);
+
+  copyShareLinkBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(shareLinkInput.value);
+      const original = copyShareLinkBtn.textContent;
+      copyShareLinkBtn.textContent = "Copied!";
+      setTimeout(() => {
+        copyShareLinkBtn.textContent = original;
+      }, 1500);
+    } catch {
+      shareLinkInput.select(); // clipboard API unavailable/denied -- fall back to select-and-Ctrl+C
+    }
+  });
+
+  downloadShareFileBtn.addEventListener("click", () => {
+    const payload = currentSharePayload();
+    const name = findPlaylist(playlists, activePlaylistId).name;
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${name.replace(/[^\w -]+/g, "_") || "playlist"}.playlist.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  // --- Import a playlist from a previously-exported file ---
+  const importPlaylistBtn = document.getElementById("importPlaylistBtn");
+  const importPlaylistFile = document.getElementById("importPlaylistFile");
+  const importPlaylistError = document.getElementById("importPlaylistError");
+
+  importPlaylistBtn.addEventListener("click", () => importPlaylistFile.click());
+  importPlaylistFile.addEventListener("change", async () => {
+    const file = importPlaylistFile.files?.[0];
+    importPlaylistFile.value = "";
+    if (!file) return;
+    try {
+      const record = recordFromSharedPayload(JSON.parse(await file.text()));
+      playlists.push(record);
+      switchToPlaylist(record.id);
+      importPlaylistError.hidden = true;
+    } catch (e) {
+      importPlaylistError.textContent = `Couldn't import that file: ${e.message}`;
+      importPlaylistError.hidden = false;
+    }
+  });
+
   const engine = createPlaybackEngine();
-  const styleLabelFor = (id) => manifest.styles.find((s) => s.id === id)?.label ?? id;
+  // Vibe emoji only here, not the full church-fit phrase (AI_TODO.md item
+  // 7 -- lock-screen/scrubber space is limited, per its own caution).
+  const styleLabelFor = (id) => {
+    const style = manifest.styles.find((s) => s.id === id);
+    if (!style) return id;
+    return style.emoji ? `${style.emoji} ${style.label}` : style.label;
+  };
   let unmountStudyView = null;
   let unmountPlayerControls = null;
 
-  const modeSelect = document.getElementById("modeSelect");
+  // --- Karaoke Mode options (redesigned: one slider + a few checkboxes,
+  // replacing the old mode/mask-style dropdowns -- Disappearing Word's
+  // separate "vanish ahead of playback" mechanic is gone for good, folded
+  // into the slider) ---
+  const hintLevelSlider = document.getElementById("hintLevelSlider");
   const hintLevelInput = document.getElementById("hintLevelInput");
-  const hintLevelLabel = document.getElementById("hintLevelLabel");
-  const hintLevelPercentSign = document.getElementById("hintLevelPercentSign");
-  const lookaheadSelect = document.getElementById("lookaheadSelect");
-  const lookaheadLabel = document.getElementById("lookaheadLabel");
-  const lengthMatchedRow = document.getElementById("lengthMatchedRow");
+  const rampCheckbox = document.getElementById("rampCheckbox");
   const lengthMatchedCheckbox = document.getElementById("lengthMatchedCheckbox");
-  modeSelect.addEventListener("change", () => {
-    const showHint = modeSelect.value === "invisible";
-    hintLevelInput.hidden = !showHint;
-    hintLevelLabel.hidden = !showHint;
-    hintLevelPercentSign.hidden = !showHint;
-    const showLookahead = modeSelect.value === "disappearing";
-    lookaheadSelect.hidden = !showLookahead;
-    lookaheadLabel.hidden = !showLookahead;
-    lengthMatchedRow.hidden = !["invisible", "blackout", "typeahead"].includes(modeSelect.value);
+  const scoredCheckbox = document.getElementById("scoredCheckbox");
+  const scoredOptionsRow = document.getElementById("scoredOptionsRow");
+  const scoredInputSelect = document.getElementById("scoredInputSelect");
+
+  // Slider and the "enter the percent directly" number input always show
+  // the same value -- either one can drive it.
+  hintLevelSlider.addEventListener("input", () => {
+    hintLevelInput.value = hintLevelSlider.value;
+  });
+  hintLevelInput.addEventListener("input", () => {
+    const clamped = Math.min(100, Math.max(0, Number(hintLevelInput.value) || 0));
+    hintLevelSlider.value = String(clamped);
+  });
+
+  function updateScoredOptionsVisibility() {
+    scoredOptionsRow.hidden = !scoredCheckbox.checked;
+  }
+
+  /**
+   * Sets every Karaoke Mode control from the active playlist's
+   * studyOptions (falling back to defaultStudyOptions() for a record that
+   * predates this field -- pre-release, no migration, see AI_TODO.md's own
+   * note on this). scoredInput auto-detects by browser capability (voice
+   * where supported, keyboard otherwise) only when the playlist has never
+   * had an explicit choice recorded (`scoredInput` still null) -- once a
+   * Pathfinder picks one, it's a per-playlist choice like everything else
+   * here, not re-guessed on every load.
+   */
+  function syncStudyOptionsFromActivePlaylist() {
+    const record = findPlaylist(playlists, activePlaylistId);
+    const options = record.studyOptions ?? defaultStudyOptions();
+    hintLevelSlider.value = String(options.blankPercent);
+    hintLevelInput.value = String(options.blankPercent);
+    rampCheckbox.checked = options.rampOnRepeat;
+    lengthMatchedCheckbox.checked = options.lengthMatched;
+    scoredCheckbox.checked = options.scored;
+    scoredInputSelect.value = options.scoredInput ?? (isSingAlongSupported() ? "singalong" : "typeahead");
+    updateScoredOptionsVisibility();
+  }
+  syncStudyOptionsFromActivePlaylist();
+
+  for (const control of [hintLevelSlider, hintLevelInput, rampCheckbox, lengthMatchedCheckbox, scoredInputSelect]) {
+    control.addEventListener("change", () => persistActivePlaylist());
+  }
+  scoredCheckbox.addEventListener("change", () => {
+    updateScoredOptionsVisibility();
+    persistActivePlaylist();
   });
 
   document.getElementById("startKaraokeBtn").addEventListener("click", () => {
@@ -347,28 +654,25 @@ function initSelectionUi(manifest, manifestUrl) {
 
     const karaokeView = document.getElementById("karaokeView");
     const playerControls = document.getElementById("playerControls");
-    const mode = modeSelect.value;
 
-    if (mode === "typeahead") {
+    if (scoredCheckbox.checked && scoredInputSelect.value === "typeahead") {
       playerControls.innerHTML = "";
       unmountStudyView = mountTypeAhead(karaokeView, program, () => lengthMatchedCheckbox.checked);
       return;
     }
 
     engine.loadProgram(program);
-    const getLengthMatched = () => lengthMatchedCheckbox.checked;
-    if (mode === "disappearing")
-      unmountStudyView = mountDisappearingWord(karaokeView, engine, manifest, mix, () => Number(lookaheadSelect.value), verseFilter);
-    else if (mode === "invisible")
-      unmountStudyView = mountInvisibleWord(
-        karaokeView, engine, manifest, mix,
-        () => Math.min(100, Math.max(0, Number(hintLevelInput.value) || 0)) / 100,
-        getLengthMatched,
-        verseFilter
-      );
-    else if (mode === "blackout") unmountStudyView = mountBlackoutRamp(karaokeView, engine, manifest, mix, getLengthMatched, verseFilter);
-    else if (mode === "singalong") unmountStudyView = mountSingAlong(karaokeView, engine, manifest, mix, verseFilter);
-    else unmountStudyView = mountKaraoke(karaokeView, engine, manifest, mix, verseFilter);
+
+    if (scoredCheckbox.checked) {
+      unmountStudyView = mountSingAlong(karaokeView, engine, manifest, mix, verseFilter);
+    } else {
+      const getUnscoredOptions = () => ({
+        blankFraction: Math.min(100, Math.max(0, Number(hintLevelInput.value) || 0)) / 100,
+        rampOnRepeat: rampCheckbox.checked,
+        lengthMatched: lengthMatchedCheckbox.checked,
+      });
+      unmountStudyView = mountUnscored(karaokeView, engine, manifest, mix, getUnscoredOptions, verseFilter);
+    }
     unmountPlayerControls = mountPlayerControls(playerControls, engine, { styleLabelFor });
     engine.play();
   });

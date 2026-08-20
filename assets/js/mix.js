@@ -8,7 +8,39 @@ import { canonicalWords, findSection, orderedSections, sectionKey } from "./libr
  * this array, right down to a single index.
  */
 export function createMix(defaultStyleId) {
-  return { defaultStyleId, sections: new Map() };
+  return { defaultStyleId, defaultTakeRank: 0, sections: new Map(), takeOverrides: {} };
+}
+
+/**
+ * Which take (0 = lowest, 1 = next, ...) to use for a given section+style --
+ * see AI_TODO.md item 6. An explicit per-(section, style) override (set via
+ * the mix editor, same granularity as style painting) wins; otherwise falls
+ * back to `mix.defaultTakeRank` (set via the main style selector's take
+ * toggle, a blanket "prefer take N" Pathfinder preference applied wherever
+ * there's no more specific override) which itself defaults to 0 -- today's
+ * unchanged "always lowest take" behavior.
+ */
+export function getTakeRank(mix, sectionKeyStr, styleId) {
+  return mix.takeOverrides?.[sectionKeyStr]?.[styleId] ?? mix.defaultTakeRank ?? 0;
+}
+
+/** Sets a per-(section, style) take override, or clears it (back to following mix.defaultTakeRank) if `rank` already matches the current default -- keeps the persisted shape from accumulating overrides that aren't actually doing anything. */
+export function setTakeRank(mix, sectionKeyStr, styleId, rank) {
+  if (!mix.takeOverrides) mix.takeOverrides = {};
+  if (rank === (mix.defaultTakeRank ?? 0)) {
+    if (mix.takeOverrides[sectionKeyStr]) {
+      delete mix.takeOverrides[sectionKeyStr][styleId];
+      if (Object.keys(mix.takeOverrides[sectionKeyStr]).length === 0) delete mix.takeOverrides[sectionKeyStr];
+    }
+    return;
+  }
+  if (!mix.takeOverrides[sectionKeyStr]) mix.takeOverrides[sectionKeyStr] = {};
+  mix.takeOverrides[sectionKeyStr][styleId] = rank;
+}
+
+/** The blanket take-rank preference applied wherever there's no more specific per-(section, style) override -- see getTakeRank. */
+export function setDefaultTakeRank(mix, rank) {
+  mix.defaultTakeRank = rank;
 }
 
 /** Ensures every currently-selected section has an assignment array, sized to its canonical word count. */
@@ -64,13 +96,20 @@ export function getRuns(mix, sectionKeyStr) {
 }
 
 export function toSerializable(mix) {
-  return { defaultStyleId: mix.defaultStyleId, sections: Object.fromEntries(mix.sections) };
+  return {
+    defaultStyleId: mix.defaultStyleId,
+    defaultTakeRank: mix.defaultTakeRank ?? 0,
+    sections: Object.fromEntries(mix.sections),
+    takeOverrides: mix.takeOverrides ?? {},
+  };
 }
 
 /** Restores a mix, but only reuses per-section arrays whose length still matches the current manifest
  *  (a changed manifest could shift canonical word counts, and a stale-length array would misalign). */
 export function fromSerializable(saved, manifest) {
   const mix = createMix(saved?.defaultStyleId ?? manifest.styles[0]?.id ?? null);
+  mix.defaultTakeRank = Number.isInteger(saved?.defaultTakeRank) ? saved.defaultTakeRank : 0;
+  mix.takeOverrides = saved?.takeOverrides && typeof saved.takeOverrides === "object" ? saved.takeOverrides : {};
   if (!saved?.sections) return mix;
   for (const section of orderedSections(manifest)) {
     const key = sectionKey(section);

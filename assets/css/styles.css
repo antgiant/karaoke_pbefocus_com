@@ -452,7 +452,8 @@ details.panel:not([open]) h2 {
 }
 
 .style-select-row select,
-.style-select-row input[type="number"] {
+.style-select-row input[type="number"],
+.style-select-row input[type="text"] {
   padding: 0.5rem 0.7rem;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -463,6 +464,106 @@ details.panel:not([open]) h2 {
 
 .style-select-row input[type="number"] {
   width: 5rem;
+}
+
+.style-select-row input[type="text"] {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+/* Karaoke Mode options (redesigned study/masking UI) */
+
+.karaoke-mode-heading {
+  margin: 0.25rem 0 0.85rem;
+  color: var(--teal-dark);
+  font-weight: 800;
+  font-size: 1.05rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.karaoke-mode-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1.1rem;
+}
+
+.hint-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.hint-slider-endlabel {
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--teal-dark);
+  white-space: nowrap;
+}
+
+.hint-slider-row input[type="range"] {
+  flex: 1 1 12rem;
+  min-width: 8rem;
+  accent-color: var(--teal);
+}
+
+.hint-slider-row input[type="number"] {
+  width: 4.5rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+/* Playlist sharing (AI_TODO.md item 5) */
+
+dialog#shareDialog {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1.5rem 1.75rem;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  max-width: min(28rem, 92vw);
+}
+
+dialog#shareDialog::backdrop {
+  background: rgba(6, 40, 49, 0.45);
+}
+
+dialog#shareDialog h2 {
+  margin: 0 0 1rem;
+  font-size: 1.2rem;
+  text-transform: uppercase;
+  color: var(--teal-dark);
+}
+
+.share-dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.share-qr {
+  align-self: center;
+  width: 100%;
+  max-width: 14rem;
+}
+
+.share-qr svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 6px;
+  /* QR codes are inherently black-on-white, functional graphics, not a
+     themed UI element -- a white backing keeps them scannable/high-contrast
+     even in dark mode, where the page background is otherwise very dark. */
+  background: #fff;
+  padding: 0.5rem;
 }
 
 .fallback-note {
@@ -505,8 +606,11 @@ details.panel:not([open]) h2 {
      sticky controls bar instead of ending up rendered underneath it (a
      sticky/fixed bar overlaps whatever content shares its screen position
      while it's "stuck" -- padding here keeps real content out of that
-     strip entirely). */
-  padding-bottom: 5.5rem;
+     strip entirely). 8rem (not the original 5.5rem) to also clear
+     .karaoke-line-nav, which sits below the karaoke-window and wasn't
+     accounted for when 5.5rem was tuned -- verified against a real
+     browser render, not just guessed (see AI_TODO.md item 1). */
+  padding-bottom: 8rem;
 }
 
 .karaoke-heading {
@@ -523,8 +627,49 @@ details.panel:not([open]) h2 {
   line-height: 2.1;
 }
 
-.karaoke-verse {
+/* Windowed karaoke display only (word-stream.js) -- exactly one
+   .karaoke-line-group (current line + a dimmed preview of the next) is
+   ever present, swapped for a new group as playback (or manual line
+   navigation) advances. Fixed-height + overflow hidden is what clips the
+   outgoing group's slide-up-and-fade exit -- scoped to this small 2-line
+   box via its own .karaoke-window class (not the bare .karaoke-stream,
+   which type-ahead.js also reuses for its own unrelated, non-windowed,
+   naturally-growing display -- clipping that would be a real regression). */
+.karaoke-window {
+  position: relative;
+  overflow: hidden;
+  min-height: calc(2 * 1.4rem * 2.1 + 0.9rem);
+}
+
+.karaoke-line-group {
+  position: absolute;
+  inset: 0;
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+.karaoke-line-group.leaving {
+  transform: translateY(-100%);
+  opacity: 0;
+}
+
+/* .karaoke-verse: type-ahead.js's own independent, non-windowed verse
+   rendering (it doesn't go through word-stream.js -- see AI_TODO.md item 3
+   for why) still uses this class name; kept alongside .karaoke-line rather
+   than renamed. */
+.karaoke-verse,
+.karaoke-line {
   margin: 0 0 0.9rem;
+}
+
+.karaoke-line.next-line {
+  opacity: 0.5;
+}
+
+.karaoke-line-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
 }
 
 .verse-num {
@@ -579,10 +724,6 @@ details.panel:not([open]) h2 {
   background: var(--teal);
   color: #fff;
   font-weight: 800;
-}
-
-.karaoke-word.gone {
-  visibility: hidden;
 }
 
 .karaoke-word.blanked {
@@ -685,6 +826,14 @@ details.panel:not([open]) h2 {
   background: color-mix(in srgb, var(--swatch-color) 30%, transparent);
 }
 
+/* Church-appropriateness badge (AI_TODO.md item 7) -- pushed to the pill's
+   trailing edge, decorative (the full description is the button's title
+   tooltip, and screen readers get it from there, not this span). */
+.style-swatch-fit {
+  margin-left: auto;
+  padding-left: 0.3rem;
+}
+
 .mix-editor-hint {
   margin: 0 0 1rem;
   color: var(--teal-dark);
@@ -728,6 +877,35 @@ details.panel:not([open]) h2 {
 
 .mix-section[open] > .mix-section-heading::before {
   transform: rotate(90deg);
+}
+
+.mix-take-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  padding: 0.5rem 0.85rem;
+  background: #fff;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.85rem;
+}
+
+.mix-take-controls:empty {
+  display: none;
+}
+
+.mix-take-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-weight: 700;
+  color: var(--teal-dark);
+}
+
+.mix-take-control select {
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 0.85rem;
 }
 
 .word-strip {

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PBE Playlist</title>
+    <title>PBE Karaoke</title>
     <link rel="stylesheet" href="assets/css/styles.css" />
     <script type="module" src="assets/js/main.js" defer></script>
   </head>
@@ -21,14 +21,14 @@
           <a href="https://quiz.pbefocus.com">Quiz Builder</a>
           <a href="https://pbe-scores.wooleys.us">Score Keeper</a>
           <a href="https://pbe.wooleys.us/">Fill-In-The-Blank</a>
-          <a class="active" href="/">Playlist</a>
+          <a class="active" href="/">Karaoke</a>
         </nav>
       </div>
     </header>
 
     <main>
       <section class="mission-statement">
-        <h1>PBE Playlist</h1>
+        <h1>PBE Karaoke</h1>
         <p>
           Pick your chapters and verses, choose the musical style for each part of the
           passage, then study with karaoke-style tools built for memorizing scripture.
@@ -51,6 +51,47 @@
       </section>
 
       <div id="appPanel" hidden>
+        <section class="panel" id="playlistPanel">
+          <h2>Playlists</h2>
+          <div class="style-select-row">
+            <label for="playlistSelect">Active playlist</label>
+            <select id="playlistSelect"></select>
+            <button id="newPlaylistBtn" type="button" class="btn secondary">New</button>
+            <button id="renamePlaylistBtn" type="button" class="btn secondary">Rename</button>
+            <button id="duplicatePlaylistBtn" type="button" class="btn secondary">Duplicate</button>
+            <button id="deletePlaylistBtn" type="button" class="btn secondary">Delete</button>
+          </div>
+          <div class="style-select-row">
+            <button id="sharePlaylistBtn" type="button" class="btn secondary">Share This Playlist</button>
+            <button id="importPlaylistBtn" type="button" class="btn secondary">Import Playlist File…</button>
+            <input id="importPlaylistFile" type="file" accept="application/json" hidden />
+          </div>
+          <p id="importPlaylistError" class="gate-error" role="alert" hidden></p>
+        </section>
+
+        <dialog id="shareDialog">
+          <form method="dialog" class="share-dialog-form">
+            <h2>Share "<span id="shareDialogPlaylistName"></span>"</h2>
+            <label class="inline-checkbox">
+              <input type="checkbox" id="shareIncludeLibraryCheckbox" />
+              Also include library access — the recipient won't need their own
+              link, but this shares your <strong>whole library</strong>, not
+              just this playlist
+            </label>
+            <div class="style-select-row">
+              <label for="shareLinkInput">Link</label>
+              <input id="shareLinkInput" type="text" readonly />
+              <button id="copyShareLinkBtn" type="button" class="btn secondary">Copy Link</button>
+            </div>
+            <div id="shareQrContainer" class="share-qr"></div>
+            <p id="shareFileNote" class="fallback-note" hidden></p>
+            <div class="style-select-row">
+              <button id="downloadShareFileBtn" type="button" class="btn secondary">Download as File Instead</button>
+              <button type="submit" class="btn">Close</button>
+            </div>
+          </form>
+        </dialog>
+
         <details class="panel" id="selectionPanel" open>
           <summary class="panel-summary"><h2>Choose Chapters &amp; Verses</h2></summary>
           <div class="selection-toolbar">
@@ -70,41 +111,45 @@
           <div class="style-select-row">
             <label for="styleSelect">Default Musical Style</label>
             <select id="styleSelect"></select>
+            <label class="inline-checkbox" id="defaultTakeRow">
+              <input type="checkbox" id="defaultTakeCheckbox" />
+              Prefer alternate take (where one exists)
+            </label>
             <button id="toggleMixEditorBtn" type="button" class="btn secondary">Customize Genre Mix</button>
           </div>
           <div id="mixEditor" hidden></div>
-          <div class="style-select-row">
-            <label for="modeSelect">Study mode</label>
-            <select id="modeSelect">
-              <option value="karaoke">Standard Karaoke</option>
-              <option value="disappearing">Disappearing Word</option>
-              <option value="invisible">Invisible Word</option>
-              <option value="blackout">Blackout Ramp</option>
-              <option value="typeahead">Type Ahead</option>
-              <option value="singalong">Sing-Along (Scored)</option>
-            </select>
-            <label for="hintLevelInput" id="hintLevelLabel" hidden>Hint level (%)</label>
-            <input type="number" id="hintLevelInput" min="0" max="100" step="5" value="15" hidden />
-            <span id="hintLevelPercentSign" hidden>%</span>
-            <label for="lookaheadSelect" id="lookaheadLabel" hidden>Vanish</label>
-            <select id="lookaheadSelect" hidden>
-              <option value="0" selected>As sung (default)</option>
-              <option value="1">Current word too</option>
-              <option value="2">1 word ahead</option>
-              <option value="3">2 words ahead</option>
-              <option value="4">3 words ahead</option>
-              <option value="5">4 words ahead</option>
-              <option value="6">5 words ahead</option>
-              <option value="7">6 words ahead</option>
-              <option value="8">7 words ahead</option>
-              <option value="9">8 words ahead</option>
-              <option value="10">9 words ahead</option>
-              <option value="11">10 words ahead</option>
-            </select>
-            <label class="inline-checkbox" id="lengthMatchedRow" hidden>
+
+          <h3 class="karaoke-mode-heading">Karaoke Mode</h3>
+          <div class="karaoke-mode-options">
+            <div class="hint-slider-row">
+              <span class="hint-slider-endlabel">Karaoke</span>
+              <input type="range" id="hintLevelSlider" min="0" max="100" step="5" value="0" aria-label="Blank percentage, from Karaoke to Memorized" />
+              <span class="hint-slider-endlabel">Memorized</span>
+              <input type="number" id="hintLevelInput" min="0" max="100" step="5" value="0" aria-label="Blank percentage, as a number" />
+              <span>%</span>
+            </div>
+            <label class="inline-checkbox">
+              <input type="checkbox" id="rampCheckbox" />
+              Get harder each replay
+            </label>
+            <label class="inline-checkbox">
               <input type="checkbox" id="lengthMatchedCheckbox" />
               Blank length matches word length
             </label>
+            <label class="inline-checkbox">
+              <input type="checkbox" id="scoredCheckbox" />
+              Scored
+            </label>
+            <div class="style-select-row" id="scoredOptionsRow" hidden>
+              <label for="scoredInputSelect">Input method</label>
+              <select id="scoredInputSelect">
+                <option value="typeahead">Type Ahead (keyboard)</option>
+                <option value="singalong">Sing-Along (voice)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="style-select-row">
             <button id="startKaraokeBtn" type="button" class="btn">Start Studying</button>
             <button id="sleepModeBtn" type="button" class="btn secondary">🌙 Sleep Mode</button>
           </div>

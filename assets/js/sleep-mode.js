@@ -1,6 +1,13 @@
 import { shuffleBySection } from "./program-builder.js";
-import { mountKaraoke } from "./study-modes/karaoke.js";
+import { mountUnscored } from "./study-modes/unscored.js";
 import { mountPlayerControls } from "./player-controls.js";
+
+// Plain karaoke, no masking -- blankFraction 0 (see study-modes/unscored.js),
+// same as what the old, now-retired karaoke.js did (see AI_TODO.md item 2).
+// Sleep Mode is for passive, hands-off listening, so it deliberately always
+// uses this regardless of whatever Karaoke Mode settings a Pathfinder has
+// picked for active study.
+const PLAIN_KARAOKE_OPTIONS = () => ({ blankFraction: 0 });
 
 const SLEEP_TIMER_OPTIONS = [
   { value: "0", label: "No timer" },
@@ -15,8 +22,9 @@ const FADE_SECONDS = 8;
 /**
  * A full-viewport, deliberately non-theme-following night skin around the
  * same karaoke word display and transport used elsewhere -- same content,
- * hands-off and dark-room-friendly. Reuses mountKaraoke/mountPlayerControls
- * rather than re-implementing rendering, and layers a sleep timer +
+ * hands-off and dark-room-friendly. Reuses mountUnscored (plain, unmasked)
+ * /mountPlayerControls rather than re-implementing rendering, and layers a
+ * sleep timer +
  * MediaSession (lock-screen controls, so playback survives a locked
  * screen) on top. Returns an exit() function that tears everything down.
  */
@@ -95,7 +103,7 @@ export function mountSleepMode(engine, program, manifest, mix, { styleLabelFor =
       navigator.mediaSession.metadata = new MediaMetadata({
         title: block.label,
         artist: styleLabelFor(block.style),
-        album: "PBE Playlist",
+        album: "PBE Karaoke",
       });
     };
     const offBlockchange = engine.on("blockchange", updateMetadata);
@@ -128,7 +136,7 @@ export function mountSleepMode(engine, program, manifest, mix, { styleLabelFor =
   // nobody and leave the Play/Pause button stuck showing "Play" while
   // actually playing.
   engine.loadProgram(program);
-  const unmountKaraoke = mountKaraoke(karaokeContainer, engine, manifest, mix, verseFilter);
+  const unmountKaraoke = mountUnscored(karaokeContainer, engine, manifest, mix, PLAIN_KARAOKE_OPTIONS, verseFilter);
   const unmountControls = mountPlayerControls(controlsContainer, engine, { styleLabelFor });
   engine.play();
 

@@ -74,11 +74,25 @@ export function orderedSections(manifest) {
     );
 }
 
-/** The lowest-take recording for a section in a given style, or null if that style isn't available there. */
-export function pickRecording(section, styleId) {
-  const candidates = section.recordings.filter((r) => r.style === styleId);
+/** Every recording for a section in a given style, sorted ascending by take number (real manifest take numbers are arbitrary per-file, not necessarily 1/2 -- this is what lets callers address "the Nth take" positionally instead of by a specific number). */
+export function listTakes(section, styleId) {
+  return section.recordings.filter((r) => r.style === styleId).sort((a, b) => a.take - b.take);
+}
+
+/**
+ * The recording for a section in a given style at position `takeRank` (0 =
+ * lowest take, 1 = next, ...), or null if that style isn't available there
+ * at all. Falls back to rank 0 if `takeRank` is out of range for however
+ * many takes this particular section+style actually has -- e.g. a
+ * Pathfinder's saved "prefer take 2" choice shouldn't error or silently
+ * omit audio just because one specific section only has a single take;
+ * take 1 is always a safe, present fallback whenever *any* recording
+ * exists for that style.
+ */
+export function pickRecording(section, styleId, takeRank = 0) {
+  const candidates = listTakes(section, styleId);
   if (candidates.length === 0) return null;
-  return candidates.slice().sort((a, b) => a.take - b.take)[0];
+  return candidates[takeRank] ?? candidates[0];
 }
 
 /**

@@ -1,6 +1,6 @@
-# PBE Playlist (Static Site)
+# PBE Karaoke (Static Site)
 
-An interactive scripture-song study tool for the PBE Playlist library: pick
+An interactive scripture-song study tool for the PBE Karaoke library: pick
 chapters/verses, choose the musical style for any part of the passage down
 to a single word, and drill it with several karaoke-style memorization
 modes -- or just let it play hands-off like a normal playlist.
@@ -21,13 +21,61 @@ its output never belong in this public repo (see `.gitignore`).
 
 ## Current Features
 
+- Named, multi-playlist support: create/rename/duplicate/delete any number
+  of playlists (`assets/js/playlists.js`), each with its own
+  chapter/verse selection and genre mix, switchable from the Playlists
+  panel. Sharing a playlist (link + QR code, or a downloadable file for a
+  playlist too large for a reliable QR code) asks explicitly, every time,
+  whether to also bundle library access -- off by default, since that
+  grants the recipient your whole library, not just the one playlist (see
+  `assets/js/share.js`'s compact wire format: a per-payload local style
+  dictionary + run-length encoding, since a real mix is usually a handful
+  of large painted ranges, not one style per word). QR rendering is via a
+  vendored copy of `qrcode-generator` (MIT, dependency-free) --
+  `assets/js/vendor/qrcode-generator.mjs`.
 - Chapter/verse selection tree, driven entirely by the manifest
 - Genre mix editor: paint any range of words -- down to one word -- with a
   different musical style, via a Pointer-Events drag/tap UI that works the
   same on mouse and touch
-- Study modes: Standard Karaoke, Disappearing Word, Invisible Word,
-  Blackout Ramp (masks more on each replay), Type Ahead (types-to-unlock
-  recall), and Sing-Along (Web Speech API scoring, Chrome/Edge only)
+- Alternate takes: most chapter/style combos have 2+ recorded takes, and a
+  Pathfinder can now actually reach the others -- a "Prefer alternate take"
+  toggle next to the default style sets a blanket preference, and each
+  section in the mix editor gets its own take control (a checkbox for the
+  common 2-take case, a dropdown if a style has 3+) that overrides the
+  blanket preference just for that section+style. See `getTakeRank`/
+  `setTakeRank`/`setDefaultTakeRank` in `assets/js/mix.js`.
+- Style indicators: every style shows a vibe emoji plus a
+  church-appropriateness face (😇 great match / 😬 a bit of a stretch / 😱
+  a big departure) for a Seventh-Day Adventist audience whose services
+  range from traditional-hymns-only to primarily-CCM -- so "Hyperpop
+  Glitchcore" isn't a total mystery before you pick it. Set once, per
+  style, in `scripts/build_manifest.py`'s `STYLE_METADATA` and formatted
+  for display by `assets/js/style-fit.js`; the main style picker shows
+  emoji + a short phrase (self-contained plain text, since a native
+  `<select>` can't carry a tooltip), while the mix editor's style swatches
+  add a title tooltip with the full description. Styles are listed
+  everywhere in church-appropriateness order (😇 first), not alphabetically.
+- Windowed karaoke lyrics display: a standard 2-line karaoke layout
+  (current line + a dimmed preview of the next), word-by-word highlight
+  fill, and a scroll-up transition between lines -- rather than showing an
+  entire passage at once and auto-scrolling to follow it. A long passage
+  never fights a Pathfinder trying to scroll or interact with the page,
+  since there's nothing to scroll past. Previous/Next-line buttons let a
+  Pathfinder browse independent of playback (pausing it while they do).
+  See `assets/js/study-modes/word-stream.js` for the shared implementation
+  every study mode below builds on.
+- Karaoke Mode: one slider from "Karaoke" (nothing blanked) to "Memorized"
+  (everything blanked until sung), driven by `assets/js/study-modes/unscored.js`
+  -- plus "Get harder each replay" (ratchets the blank amount up on every
+  replay of the same section), "Blank length matches word length", and a
+  "Scored" checkbox that switches to Type Ahead (types-to-unlock recall) or
+  Sing-Along (Web Speech API voice scoring, Chrome/Edge only -- auto-selected
+  when the browser supports it, with a manual override either way). All of
+  these settings are saved per playlist, like everything else about it.
+  Defaults to unscored, nothing blanked. (This replaced an earlier
+  mode/mask-style-dropdown design -- Disappearing Word's separate "vanish
+  ahead of playback" mechanic was removed outright in the redesign, not
+  carried forward.)
 - Sleep Mode: a full-screen, warm/dark night skin that plays the current
   selection hands-off, with a sleep timer (fade-out) and MediaSession
   lock-screen controls
@@ -65,6 +113,24 @@ ad-hoc dev servers like Python's that tend not to.
 There's no sample manifest checked in (it would contain the private song
 content) -- generate one from your own copy of the library with
 `scripts/build_manifest.py` for local testing.
+
+## Tests
+
+```bash
+npm install   # first time only -- installs jsdom, the only dev dependency
+npm test
+```
+
+Runs Node's built-in test runner (`node --test`) against `tests/`. Still no
+build step for the app itself -- this only exists to test it. Covers the
+DOM-independent pure-logic pieces directly (e.g. `word-stream.js`'s
+`buildLines()`) and the DOM-touching pieces via `jsdom` (see
+`tests/helpers/dom.mjs`) with a small fake playback engine
+(`tests/helpers/fixtures.mjs`) standing in for `assets/js/playback-engine.js`
+-- no real audio/network/manifest needed to run the suite. Add new tests
+alongside the module they cover, one `<module>.test.mjs` per source file (or
+`<module>.<behavior>.test.mjs` for a large file, e.g.
+`word-stream.buildLines.test.mjs`).
 
 ## Manifest Schema
 

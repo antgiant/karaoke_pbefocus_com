@@ -1,5 +1,6 @@
 .DS_Store
 __pycache__/
+node_modules/
 
 # The actual song library (private, not yet cleared for public release) and
 # its Bible-text reference source. These stay local/private-host-only -- the
