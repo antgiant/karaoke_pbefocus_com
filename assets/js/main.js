@@ -258,23 +258,44 @@ function renderBookTree(manifest, selected, verseSelections, onChange) {
 /**
  * Updates the small badge next to the style <select> to reflect whichever
  * style is currently selected -- the church-fit emoji, with the full
- * phrase as both a `title` (mouse hover) and an `aria-label` (since `title`
- * alone is announced inconsistently by screen readers, and this badge is
- * the only place that information lives now that it's out of the
- * <option> text). See AI_TODO.md's UI-cleanup note: putting the full
- * "<emoji> <phrase>" text in every <option> (the original design) made
- * the closed <select> render far too wide on mobile, since it sizes to
- * its longest option.
+ * phrase as a `title` (mouse hover), an `aria-label` (since `title` alone
+ * is announced inconsistently by screen readers), and a click-to-toggle
+ * popover (see wireStyleFitBadge below) for touch devices that can't
+ * hover at all. This badge is the only place the phrase lives now that
+ * it's out of the <option> text -- see AI_TODO.md's UI-cleanup note:
+ * putting the full "<emoji> <phrase>" text in every <option> (the
+ * original design) made the closed <select> render far too wide on
+ * mobile, since it sizes to its longest option.
  */
 function updateStyleFitBadge(manifest, styleId) {
   const badge = document.getElementById("styleFitBadge");
+  const tooltip = document.getElementById("styleFitTooltip");
   const style = manifest.styles.find((s) => s.id === styleId);
   const description = style?.churchFit ? churchFitDescription(style.churchFit) : "";
   badge.textContent = style?.churchFit ? churchFitEmoji(style.churchFit) : "";
   badge.title = description;
   badge.setAttribute("aria-label", description ? `Church fit: ${description}` : "");
   badge.hidden = !description;
+  tooltip.textContent = description;
+  tooltip.hidden = true; // switching style closes any already-open popover rather than leaving stale text showing
 }
+
+/** One-time wiring for the badge's click-to-toggle popover (the `title`/`aria-label` set by updateStyleFitBadge cover mouse hover and screen readers, but a touch device can't hover at all -- this is the tap equivalent). Closes on a second click, a click elsewhere, or Escape. */
+function wireStyleFitBadge() {
+  const badge = document.getElementById("styleFitBadge");
+  const tooltip = document.getElementById("styleFitTooltip");
+  badge.addEventListener("click", (event) => {
+    event.stopPropagation();
+    tooltip.hidden = !tooltip.hidden;
+  });
+  document.addEventListener("click", (event) => {
+    if (!tooltip.hidden && event.target !== badge) tooltip.hidden = true;
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") tooltip.hidden = true;
+  });
+}
+wireStyleFitBadge();
 
 function renderStyleOptions(manifest, selectedStyleId) {
   const select = document.getElementById("styleSelect");

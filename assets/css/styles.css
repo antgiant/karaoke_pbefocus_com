@@ -475,18 +475,27 @@ details.panel:not([open]) h2 {
    <phrase>" text used to live directly in each <option>, but that made
    the closed dropdown render far too wide on mobile (it sizes to its
    longest option). Now it's just this one small badge next to the select,
-   showing the *currently selected* style's emoji, with the full phrase as
-   a hover title and an aria-label (title attributes are announced
-   inconsistently by screen readers, so this is the reliable copy). */
+   showing the *currently selected* style's emoji -- the full phrase is a
+   hover title and an aria-label (title attributes are announced
+   inconsistently by screen readers, so this is the reliable copy) *and* a
+   click-to-toggle popover (.style-fit-tooltip) for touch devices, which
+   can't hover at all. */
+.style-fit-badge-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
 .style-fit-badge {
   display: inline-flex;
   align-items: center;
+  font: inherit;
   font-size: 1.15rem;
   line-height: 1;
   padding: 0.35rem 0.5rem;
   border: 1px solid var(--line);
   border-radius: 8px;
-  cursor: default;
+  background: none;
+  cursor: pointer;
 }
 
 .style-fit-badge:empty,
@@ -497,6 +506,27 @@ details.panel:not([open]) h2 {
 .style-fit-badge:focus-visible {
   outline: 2px solid var(--teal-dark);
   outline-offset: 2px;
+}
+
+.style-fit-tooltip {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  width: max-content;
+  max-width: 16rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 8px;
+  background: var(--navy);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 400;
+  line-height: 1.35;
+  box-shadow: var(--soft-shadow);
+}
+
+.style-fit-tooltip[hidden] {
+  display: none;
 }
 
 /* Karaoke Mode options (redesigned study/masking UI) */
