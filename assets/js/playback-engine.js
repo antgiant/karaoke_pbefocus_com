@@ -1,9 +1,26 @@
-// Drives a program (see program-builder.js) through two <audio> elements
-// played back-to-back, with a short volume crossfade over the seam between
+// Drives a program (see program-builder.js) through two source "slots"
+// played back-to-back, with a volume crossfade over the seam between
 // blocks (different recordings, so it's a smoothing touch, not a promise of
 // a studio-seamless splice -- see the mix-editor UX notes in the plan).
+//
+// Most blocks play through one plain <audio> element per slot, same as
+// always. A block that has separated instrumental/vocal stems (AI_TODO.md
+// item 10 -- recording.instrumentalUrl/vocalUrl, set by
+// scripts/organize_stems.py + build_manifest.py) AND whose caller has
+// opted into vocal ducking (see setVocalDuckPredicate) instead plays
+// through a *pair* of <audio> elements (instrumental + vocal) kept in sync,
+// with the vocal element's own volume faded toward 0 while the current
+// word is "blanked" per the duck predicate -- true "guess the words"
+// recall, not just "don't read ahead" (Karaoke Mode's existing visual-only
+// blanking, study-modes/unscored.js). Every block without stems, and every
+// caller that never sets a duck predicate (Sleep Mode, Sing-Along, Type
+// Ahead), plays exactly as before -- this is additive, not a rewrite of the
+// common path.
 
-const CROSSFADE_SECONDS = 0.35;
+const SEGMENT_CROSSFADE_SECONDS = 0.35; // same-style segment boundary (a click-avoidance blip, not a real transition)
+const GENRE_CROSSFADE_SECONDS = 1.5; // the style actually changes between blocks -- "jumping between genres" deserves an audible, deliberate fade
+const DUCK_TIME_CONSTANT_SECONDS = 0.12; // how quickly the vocal track fades toward its target when a word's blanked state changes -- fast enough to feel word-synced, slow enough not to click
+const STEM_RESYNC_DRIFT_SECONDS = 0.15; // if the vocal/instrumental pair drift apart by more than this, snap them back together
 
 /** Binary search: index of the last word whose start <= t, or -1 before the first word. */
 export function wordIndexAtTime(words, t) {
@@ -20,6 +37,38 @@ export function wordIndexAtTime(words, t) {
     }
   }
   return result;
+}
+
+/** True when `block` should play through a synced instrumental+vocal pair instead of its plain audioUrl -- both stems must exist AND a duck predicate must be set (see setVocalDuckPredicate); a block with stems still plays plain audio when no predicate is active, e.g. Sleep Mode/Sing-Along/Type Ahead, which never set one. */
+export function shouldUseStem(block, duckPredicate) {
+  return !!(duckPredicate && block?.instrumentalUrl && block?.vocalUrl);
+}
+
+/**
+ * How long the crossfade into `nextBlock` should run, given the block
+ * currently playing. A block boundary where the *style* changes ("jumping
+ * between genres," e.g. a Customize Genre Mix paint boundary) gets a
+ * longer, more deliberate fade than the default -- same-style segment
+ * boundaries (e.g. a per-word alignment-gap patch mid-run) stay a short,
+ * click-avoidance blip. Never longer than the outgoing block's own
+ * duration, so a very short segment can't schedule a crossfade that
+ * outlives the block it's fading out of.
+ */
+export function crossfadeSecondsFor(prevBlock, nextBlock) {
+  if (!prevBlock || !nextBlock) return SEGMENT_CROSSFADE_SECONDS;
+  const wanted = prevBlock.style !== nextBlock.style ? GENRE_CROSSFADE_SECONDS : SEGMENT_CROSSFADE_SECONDS;
+  const duration = prevBlock.outTime - prevBlock.inTime;
+  return Math.min(wanted, Math.max(0.05, duration));
+}
+
+/** 0 (fade the vocal to silent) or 1 (full volume) for the word at time `t` in `block`, per `duckPredicate(canonicalWordIndex)` -- 1 whenever there's no predicate, no word at `t`, or that word never made it into the canonical alignment (see program-builder.js's per-word fallback notes) rather than guessing. */
+export function duckTargetFor(block, t, duckPredicate) {
+  if (!duckPredicate) return 1;
+  const idx = wordIndexAtTime(block.words, t);
+  const word = idx >= 0 ? block.words[idx] : null;
+  const canonicalIdx = word ? block.canonicalIndexMap.get(word) : undefined;
+  const isBlanked = canonicalIdx !== undefined && duckPredicate(canonicalIdx);
+  return isBlanked ? 0 : 1;
 }
 
 /**
@@ -88,64 +137,214 @@ export function seekReliably(el, time) {
   });
 }
 
+/** A single plain <audio> element wrapped in the small interface both playFromBlock/tick's crossfade math and the stem source below share. */
+function makePlainSource() {
+  const el = new Audio();
+  el.preload = "auto";
+  let envelopeVolume = 0;
+
+  return {
+    kind: "plain",
+    primaryEl: el,
+    get src() {
+      return el.src;
+    },
+    get currentTime() {
+      return el.currentTime;
+    },
+    get ended() {
+      return el.ended;
+    },
+    get volume() {
+      return envelopeVolume;
+    },
+    setUrls(audioUrl) {
+      if (el.src !== audioUrl) el.src = audioUrl;
+    },
+    load() {
+      el.load();
+    },
+    unload() {
+      el.pause();
+      el.removeAttribute("src");
+      el.load();
+    },
+    async seekAndPlay(time) {
+      await seekReliably(el, time);
+      el.play().catch(() => {});
+    },
+    play() {
+      el.play().catch(() => {});
+    },
+    pause() {
+      el.pause();
+    },
+    setVolume(v) {
+      envelopeVolume = v;
+      el.volume = v;
+    },
+    stepDuck() {
+      // Plain sources have nothing to duck -- the whole mix is one track.
+    },
+    resyncIfDrifted() {},
+  };
+}
+
+/** A synced instrumental+vocal pair for a block with separated stems -- see the file-top comment. Timing (word-level ducking) is driven by the *same* recording.words the plain path already uses, since both stems share the original recording's word timing. */
+function makeStemSource() {
+  const instrumentalEl = new Audio();
+  const vocalEl = new Audio();
+  instrumentalEl.preload = "auto";
+  vocalEl.preload = "auto";
+  let envelopeVolume = 0;
+  let duckFactor = 1; // 1 = vocal at full volume, 0 = fully faded out
+  let duckTarget = 1;
+
+  function applyVolumes() {
+    instrumentalEl.volume = envelopeVolume;
+    vocalEl.volume = envelopeVolume * duckFactor;
+  }
+
+  return {
+    kind: "stem",
+    primaryEl: instrumentalEl,
+    get src() {
+      return instrumentalEl.src;
+    },
+    get currentTime() {
+      return instrumentalEl.currentTime;
+    },
+    get ended() {
+      return instrumentalEl.ended;
+    },
+    get volume() {
+      return envelopeVolume;
+    },
+    setUrls(instrumentalUrl, vocalUrl) {
+      if (instrumentalEl.src !== instrumentalUrl) instrumentalEl.src = instrumentalUrl;
+      if (vocalEl.src !== vocalUrl) vocalEl.src = vocalUrl;
+    },
+    load() {
+      instrumentalEl.load();
+      vocalEl.load();
+    },
+    unload() {
+      for (const el of [instrumentalEl, vocalEl]) {
+        el.pause();
+        el.removeAttribute("src");
+        el.load();
+      }
+    },
+    async seekAndPlay(time) {
+      await Promise.all([seekReliably(instrumentalEl, time), seekReliably(vocalEl, time)]);
+      instrumentalEl.play().catch(() => {});
+      vocalEl.play().catch(() => {});
+      duckFactor = duckTarget = 1; // start audible -- the first tick() after blockchange sets the real target
+      applyVolumes();
+    },
+    play() {
+      instrumentalEl.play().catch(() => {});
+      vocalEl.play().catch(() => {});
+    },
+    pause() {
+      instrumentalEl.pause();
+      vocalEl.pause();
+    },
+    setVolume(v) {
+      envelopeVolume = v;
+      applyVolumes();
+    },
+    /** Fades the vocal element toward 0 (blanked) or 1 (audible) over DUCK_TIME_CONSTANT_SECONDS -- called every animation frame while this source is the active one and a duck predicate is set. */
+    setDuckTarget(target) {
+      duckTarget = target;
+    },
+    stepDuck(dtSeconds) {
+      const rate = 1 - Math.exp(-dtSeconds / DUCK_TIME_CONSTANT_SECONDS);
+      duckFactor += (duckTarget - duckFactor) * rate;
+      applyVolumes();
+    },
+    resyncIfDrifted() {
+      if (Math.abs(vocalEl.currentTime - instrumentalEl.currentTime) > STEM_RESYNC_DRIFT_SECONDS) {
+        vocalEl.currentTime = instrumentalEl.currentTime;
+      }
+    },
+  };
+}
+
 export function createPlaybackEngine() {
-  const elements = [new Audio(), new Audio()];
-  for (const el of elements) el.preload = "auto";
+  // Two slots (today's "active"/"standby" elements), each able to hold
+  // either kind of source -- which kind a slot is currently wearing is
+  // decided per-block by loadSourceForBlock(), based on whether that block
+  // has stems *and* a duck predicate is set.
+  const slots = [
+    { plain: makePlainSource(), stem: makeStemSource(), current: "plain" },
+    { plain: makePlainSource(), stem: makeStemSource(), current: "plain" },
+  ];
 
   let activeIdx = 0;
   let program = { blocks: [] };
   let blockIndex = -1;
   let crossfading = false;
+  let currentCrossfadeSeconds = SEGMENT_CROSSFADE_SECONDS;
   let isPlaying = false;
   let rafHandle = null;
+  let lastFrameTime = null;
   let masterVolume = 1; // external multiplier (e.g. sleep mode's fade-out), on top of crossfade's own volume math
+  let duckPredicate = null; // (canonicalWordIndex) => boolean, or null -- see setVocalDuckPredicate
 
   const listeners = { blockchange: [], timeupdate: [], ended: [], playstate: [] };
   function emit(event, ...args) {
     for (const fn of listeners[event]) fn(...args);
   }
 
-  const activeEl = () => elements[activeIdx];
-  const standbyEl = () => elements[1 - activeIdx];
+  const activeSlot = () => slots[activeIdx];
+  const standbySlot = () => slots[1 - activeIdx];
+  const activeSource = () => activeSlot()[activeSlot().current];
+  const standbySource = () => standbySlot()[standbySlot().current];
   const currentBlock = () => program.blocks[blockIndex] ?? null;
 
-  async function seekAndPlay(el, time) {
-    await seekReliably(el, time);
-    el.play().catch(() => {});
+  /** Sets `slot`'s current source (plain or stem, per the block) to `block`'s URLs, returning that source. Does not touch playback state. */
+  function loadSourceForBlock(slot, block) {
+    slot.current = shouldUseStem(block, duckPredicate) ? "stem" : "plain";
+    const source = slot[slot.current];
+    if (slot.current === "stem") source.setUrls(block.instrumentalUrl, block.vocalUrl);
+    else source.setUrls(block.audioUrl);
+    return source;
   }
 
   function preloadNext() {
     const next = program.blocks[blockIndex + 1];
     if (!next) return;
-    const el = standbyEl();
-    if (el.src !== next.audioUrl) el.src = next.audioUrl;
-    el.volume = 0;
-    el.load();
+    const source = loadSourceForBlock(standbySlot(), next);
+    source.setVolume(0);
+    source.load();
   }
 
   function cancelLoop() {
     if (rafHandle !== null) cancelAnimationFrame(rafHandle);
     rafHandle = null;
+    lastFrameTime = null;
   }
 
   function beginCrossfade() {
     crossfading = true;
     const next = program.blocks[blockIndex + 1];
-    const el = standbyEl();
-    el.volume = 0;
-    seekAndPlay(el, next.inTime);
+    currentCrossfadeSeconds = crossfadeSecondsFor(currentBlock(), next);
+    const source = standbySource(); // already loaded by preloadNext()
+    source.setVolume(0);
+    source.seekAndPlay(next.inTime);
   }
 
   function advanceCrossfade(timeLeft) {
-    const progress = Math.min(1, Math.max(0, 1 - timeLeft / CROSSFADE_SECONDS));
-    activeEl().volume = (1 - progress) * masterVolume;
-    standbyEl().volume = progress * masterVolume;
+    const progress = Math.min(1, Math.max(0, 1 - timeLeft / currentCrossfadeSeconds));
+    activeSource().setVolume((1 - progress) * masterVolume);
+    standbySource().setVolume(progress * masterVolume);
   }
 
   function completeCrossfade() {
-    activeEl().pause();
+    activeSource().pause();
     activeIdx = 1 - activeIdx;
-    activeEl().volume = masterVolume;
+    activeSource().setVolume(masterVolume);
     blockIndex += 1;
     crossfading = false;
     emit("blockchange", currentBlock(), blockIndex);
@@ -155,23 +354,40 @@ export function createPlaybackEngine() {
   function finish() {
     isPlaying = false;
     cancelLoop();
-    for (const el of elements) el.pause();
+    for (const slot of slots) {
+      slot.plain.pause();
+      slot.stem.pause();
+    }
     emit("ended");
     emit("playstate", false);
   }
 
-  function tick() {
+  /** For a stem-source block, moves the vocal element's volume toward 0 (blanked) or 1 (audible) based on which word `t` currently falls in and the duck predicate -- a no-op for plain sources. */
+  function updateDucking(source, block, t, dtSeconds) {
+    if (source.kind !== "stem") return;
+    source.setDuckTarget(duckTargetFor(block, t, duckPredicate));
+    source.stepDuck(dtSeconds);
+    source.resyncIfDrifted();
+  }
+
+  function tick(now) {
     const block = currentBlock();
     if (!block) return;
-    const el = activeEl();
-    const t = el.currentTime;
+    const dtSeconds = lastFrameTime === null ? 1 / 60 : Math.min(0.25, Math.max(0, (now - lastFrameTime) / 1000));
+    lastFrameTime = now;
+
+    const source = activeSource();
+    const t = source.currentTime;
     emit("timeupdate", t, block, blockIndex);
+    updateDucking(source, block, t, dtSeconds);
 
     const timeLeft = block.outTime - t;
-    const atEnd = timeLeft <= 0 || el.ended;
+    const atEnd = timeLeft <= 0 || source.ended;
 
     if (crossfading) {
       advanceCrossfade(timeLeft);
+      const standbyBlock = program.blocks[blockIndex + 1];
+      if (standbyBlock) updateDucking(standbySource(), standbyBlock, standbySource().currentTime, dtSeconds);
       if (atEnd) {
         completeCrossfade();
         if (!program.blocks[blockIndex]) {
@@ -179,11 +395,15 @@ export function createPlaybackEngine() {
           return;
         }
       }
-    } else if (timeLeft <= CROSSFADE_SECONDS && blockIndex + 1 < program.blocks.length) {
-      beginCrossfade();
-    } else if (atEnd) {
-      finish();
-      return;
+    } else {
+      const next = program.blocks[blockIndex + 1];
+      const upcoming = next ? crossfadeSecondsFor(block, next) : SEGMENT_CROSSFADE_SECONDS;
+      if (timeLeft <= upcoming && next) {
+        beginCrossfade();
+      } else if (atEnd) {
+        finish();
+        return;
+      }
     }
 
     rafHandle = requestAnimationFrame(tick);
@@ -195,28 +415,34 @@ export function createPlaybackEngine() {
     const block = program.blocks[index];
     const time = seekTime ?? block.inTime;
 
-    // If the standby element already has this exact URL loading/loaded (from
+    // If the standby slot already has this exact block loading/loaded (from
     // a prior preloadNext()), swap to it instead of starting a second,
-    // concurrent fetch of the same URL on the other element -- some servers
-    // (and this is reproducible against a plain dev server without Range
-    // support) never resolve loadedmetadata for a second simultaneous
-    // request to an identical URL, which would otherwise hang a manual
-    // skip forever.
-    let el;
-    if (standbyEl().src === block.audioUrl) {
-      activeEl().pause();
+    // concurrent fetch of the same URL -- some servers (and this is
+    // reproducible against a plain dev server without Range support) never
+    // resolve loadedmetadata for a second simultaneous request to an
+    // identical URL, which would otherwise hang a manual skip forever.
+    const wantsStem = shouldUseStem(block, duckPredicate);
+    const standbyMatches =
+      standbySlot().current === (wantsStem ? "stem" : "plain") &&
+      standbySource().src === (wantsStem ? block.instrumentalUrl : block.audioUrl);
+
+    let source;
+    if (standbyMatches) {
+      activeSource().pause();
       activeIdx = 1 - activeIdx;
-      el = activeEl();
+      source = activeSource();
     } else {
-      for (const other of elements) other.pause();
-      el = activeEl();
-      if (el.src !== block.audioUrl) el.src = block.audioUrl;
+      for (const slot of slots) {
+        slot.plain.pause();
+        slot.stem.pause();
+      }
+      source = loadSourceForBlock(activeSlot(), block);
     }
 
     blockIndex = index;
     crossfading = false;
-    await seekAndPlay(el, time);
-    activeEl().volume = masterVolume;
+    await source.seekAndPlay(time);
+    activeSource().setVolume(masterVolume);
     isPlaying = true;
     emit("blockchange", block, blockIndex);
     emit("playstate", true);
@@ -234,15 +460,31 @@ export function createPlaybackEngine() {
 
     loadProgram(newProgram) {
       cancelLoop();
-      for (const el of elements) {
-        el.pause();
-        el.removeAttribute("src");
-        el.load();
+      for (const slot of slots) {
+        slot.plain.unload();
+        slot.stem.unload();
+        slot.current = "plain";
       }
       program = newProgram;
       blockIndex = -1;
       crossfading = false;
       isPlaying = false;
+    },
+
+    /**
+     * Opts into per-word vocal ducking for any upcoming block that has
+     * separated stems (AI_TODO.md item 10) -- `predicate(canonicalWordIndex)`
+     * returns true for a word that should be silent in the vocal track
+     * right now. Pass null (the default) to turn ducking off; blocks then
+     * always play their plain, single-track audioUrl regardless of
+     * whether stems exist for them. Only takes effect for blocks loaded
+     * *after* the call (the currently-active block, if any, keeps
+     * whichever source kind it already started with) -- study-modes/
+     * unscored.js calls this once per section change, which is always
+     * before the next block starts.
+     */
+    setVocalDuckPredicate(predicate) {
+      duckPredicate = predicate ?? null;
     },
 
     play() {
@@ -251,8 +493,8 @@ export function createPlaybackEngine() {
         return;
       }
       isPlaying = true;
-      activeEl().play().catch(() => {});
-      if (crossfading) standbyEl().play().catch(() => {});
+      activeSource().play();
+      if (crossfading) standbySource().play();
       cancelLoop();
       rafHandle = requestAnimationFrame(tick);
       emit("playstate", true);
@@ -261,8 +503,8 @@ export function createPlaybackEngine() {
     pause() {
       isPlaying = false;
       cancelLoop();
-      activeEl().pause();
-      if (crossfading) standbyEl().pause();
+      activeSource().pause();
+      if (crossfading) standbySource().pause();
       emit("playstate", false);
     },
 
@@ -292,26 +534,27 @@ export function createPlaybackEngine() {
     setMasterVolume(v) {
       masterVolume = Math.min(1, Math.max(0, v));
       if (crossfading) {
-        // Re-derive each element's crossfade progress from its current volume rather than
+        // Re-derive each source's crossfade progress from its current volume rather than
         // recomputing from time, so an in-flight fade keeps its relative balance.
-        const priorTotal = activeEl().volume + standbyEl().volume;
-        const standbyShare = priorTotal > 0 ? standbyEl().volume / priorTotal : 0;
-        activeEl().volume = (1 - standbyShare) * masterVolume;
-        standbyEl().volume = standbyShare * masterVolume;
+        const priorTotal = activeSource().volume + standbySource().volume;
+        const standbyShare = priorTotal > 0 ? standbySource().volume / priorTotal : 0;
+        activeSource().setVolume((1 - standbyShare) * masterVolume);
+        standbySource().setVolume(standbyShare * masterVolume);
       } else {
-        activeEl().volume = masterVolume;
+        activeSource().setVolume(masterVolume);
       }
     },
 
     getState() {
       const block = currentBlock();
+      const source = block ? activeSource() : null;
       return {
         isPlaying,
         blockIndex,
         block,
         totalBlocks: program.blocks.length,
-        currentTimeInBlock: block ? activeEl().currentTime : 0,
-        wordIndex: block ? wordIndexAtTime(block.words, activeEl().currentTime) : -1,
+        currentTimeInBlock: source ? source.currentTime : 0,
+        wordIndex: source ? wordIndexAtTime(block.words, source.currentTime) : -1,
       };
     },
   };

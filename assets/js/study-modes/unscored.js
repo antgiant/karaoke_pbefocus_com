@@ -30,12 +30,40 @@ const RAMP_STEP_PER_REPEAT = 0.2;
  * gets harder each time around, capped at fully blanked) -- the old
  * "Blackout Ramp" behavior, now just a checkbox alongside the slider
  * rather than a separate mode.
+ *
+ * getOptions().duckVocals (AI_TODO.md item 10) additionally fades a
+ * blanked word's *sung* audio toward silence, not just its on-screen
+ * text -- but only for whichever blocks actually have separated
+ * instrumental/vocal stems (most don't yet); everything else keeps
+ * playing its one full-mix recording exactly as before. See
+ * playback-engine.js's setVocalDuckPredicate.
  */
 export function mountUnscored(container, engine, manifest, mix, getOptions, verseFilter) {
   const view = createPassageView(container, engine, manifest, mix, verseFilter);
   const playCounts = new Map();
   let revealed = new Set();
   let hinted = new Set();
+
+  // Read once, here, rather than live via getOptions() on every call --
+  // there's no UI path to flip this checkbox *while* Karaoke Mode is
+  // already playing (it lives in the setup panel; changing it only takes
+  // effect on the next "Start Studying" click, which tears down this mount
+  // and creates a fresh one). Registered immediately -- before onSectionChange
+  // has fired even once -- rather than reactively inside it below, because
+  // of an ordering constraint: the engine decides plain-vs-stem for a block
+  // *before* it emits "blockchange" (a block has to be loaded before
+  // anything can react to it starting), but onSectionChange only fires
+  // *from* that same blockchange event. A predicate set reactively there
+  // would always be one block too late -- the very first block of every
+  // section would incorrectly play its plain audioUrl even with stems
+  // available and duckVocals on. The closure below still reads live
+  // `hinted`, so it's accurate by the time it's actually *called* (from
+  // playback-engine.js's tick(), well after this section's own
+  // onSectionChange has already run and updated `hinted`) -- only the
+  // enabled/disabled decision itself is fixed at mount time.
+  if (getOptions().duckVocals) {
+    engine.setVocalDuckPredicate((canonicalIdx) => !hinted.has(canonicalIdx));
+  }
 
   view.setOnSectionChange((section, canonical) => {
     revealed = new Set();
@@ -71,5 +99,8 @@ export function mountUnscored(container, engine, manifest, mix, getOptions, vers
     }
   });
 
-  return view.unmount;
+  return function unmount() {
+    engine.setVocalDuckPredicate(null);
+    view.unmount();
+  };
 }

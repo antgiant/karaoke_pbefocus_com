@@ -342,6 +342,7 @@ function initSelectionUi(manifest, manifestUrl) {
       lengthMatched: lengthMatchedCheckbox.checked,
       scored: scoredCheckbox.checked,
       scoredInput: scoredInputSelect.value,
+      duckVocals: duckVocalsCheckbox.checked,
     };
     saveState({ schemaVersion: SCHEMA_VERSION, manifestUrl, playlists, activePlaylistId });
   }
@@ -588,6 +589,7 @@ function initSelectionUi(manifest, manifestUrl) {
   const hintLevelInput = document.getElementById("hintLevelInput");
   const rampCheckbox = document.getElementById("rampCheckbox");
   const lengthMatchedCheckbox = document.getElementById("lengthMatchedCheckbox");
+  const duckVocalsCheckbox = document.getElementById("duckVocalsCheckbox");
   const scoredCheckbox = document.getElementById("scoredCheckbox");
   const scoredOptionsRow = document.getElementById("scoredOptionsRow");
   const scoredInputSelect = document.getElementById("scoredInputSelect");
@@ -623,13 +625,14 @@ function initSelectionUi(manifest, manifestUrl) {
     hintLevelInput.value = String(options.blankPercent);
     rampCheckbox.checked = options.rampOnRepeat;
     lengthMatchedCheckbox.checked = options.lengthMatched;
+    duckVocalsCheckbox.checked = options.duckVocals ?? false;
     scoredCheckbox.checked = options.scored;
     scoredInputSelect.value = options.scoredInput ?? (isSingAlongSupported() ? "singalong" : "typeahead");
     updateScoredOptionsVisibility();
   }
   syncStudyOptionsFromActivePlaylist();
 
-  for (const control of [hintLevelSlider, hintLevelInput, rampCheckbox, lengthMatchedCheckbox, scoredInputSelect]) {
+  for (const control of [hintLevelSlider, hintLevelInput, rampCheckbox, lengthMatchedCheckbox, duckVocalsCheckbox, scoredInputSelect]) {
     control.addEventListener("change", () => persistActivePlaylist());
   }
   scoredCheckbox.addEventListener("change", () => {
@@ -670,6 +673,7 @@ function initSelectionUi(manifest, manifestUrl) {
         blankFraction: Math.min(100, Math.max(0, Number(hintLevelInput.value) || 0)) / 100,
         rampOnRepeat: rampCheckbox.checked,
         lengthMatched: lengthMatchedCheckbox.checked,
+        duckVocals: duckVocalsCheckbox.checked,
       });
       unmountStudyView = mountUnscored(karaokeView, engine, manifest, mix, getUnscoredOptions, verseFilter);
     }

@@ -20,6 +20,7 @@ test("defaultStudyOptions: defaults to unscored plain karaoke (nothing blanked),
   assert.equal(options.lengthMatched, false);
   assert.equal(options.scored, false);
   assert.equal(options.scoredInput, null, "not yet chosen -- lets the UI auto-detect on first use rather than forcing one input method");
+  assert.equal(options.duckVocals, false, "off by default -- a new/experimental effect, and only a handful of recordings have stems so far");
 });
 
 test("createPlaylistRecord: studyOptions defaults to defaultStudyOptions()", () => {

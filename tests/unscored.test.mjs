@@ -129,3 +129,29 @@ test("unmount stops rendering further updates", () => {
   engine.emit("timeupdate", words[4].start, block);
   assert.equal(container.innerHTML, before);
 });
+
+test("duckVocals off (default): the engine's vocal duck predicate is never set during mount/playback", () => {
+  const { engine } = setup({ options: () => ({ blankFraction: 1 }) }); // duckVocals omitted -- falsy
+  assert.equal(engine.calls.setVocalDuckPredicate.length, 0, "never called at all -- a block with stems should keep playing plain audio, not stems-always-at-full-volume");
+});
+
+test("duckVocals on: the engine gets a predicate matching this section's blanked words, not the hinted ones", () => {
+  const { engine } = setup({ versesWordCounts: [6], options: () => ({ blankFraction: 1, duckVocals: true }) });
+  const predicate = engine.calls.setVocalDuckPredicate.at(-1);
+  assert.equal(typeof predicate, "function");
+  // blankFraction 1 -> nothing hinted -> every canonical index should be "blanked" (duck target true)
+  for (let i = 0; i < 6; i++) assert.equal(predicate(i), true, `index ${i} should be blanked at blankFraction 1`);
+});
+
+test("duckVocals on: hinted (revealed) words are excluded from the duck predicate", () => {
+  const { engine } = setup({ versesWordCounts: [6], options: () => ({ blankFraction: 0, duckVocals: true }) });
+  const predicate = engine.calls.setVocalDuckPredicate.at(-1);
+  // blankFraction 0 -> everything hinted -> nothing should be ducked
+  for (let i = 0; i < 6; i++) assert.equal(predicate(i), false, `index ${i} should NOT be ducked at blankFraction 0`);
+});
+
+test("unmount clears the engine's vocal duck predicate so a later study mode doesn't inherit it", () => {
+  const { engine, unmount } = setup({ options: () => ({ blankFraction: 1, duckVocals: true }) });
+  unmount();
+  assert.equal(engine.calls.setVocalDuckPredicate.at(-1), null);
+});

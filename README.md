@@ -75,7 +75,22 @@ its output never belong in this public repo (see `.gitignore`).
   Defaults to unscored, nothing blanked. (This replaced an earlier
   mode/mask-style-dropdown design -- Disappearing Word's separate "vanish
   ahead of playback" mechanic was removed outright in the redesign, not
-  carried forward.)
+  carried forward.) An additional "Also fade out the sung words when
+  blanked (where available)" checkbox extends the blanking from the
+  on-screen text to the actual audio -- for whichever recordings have
+  separated instrumental/vocal stems (a growing but still small subset of
+  the library), the vocal track fades toward silence for exactly the
+  words currently blanked, true "guess the words" recall rather than just
+  "don't read ahead." Off by default (only takes effect for a stem-backed
+  recording, otherwise a no-op). See `scripts/organize_stems.py` for how a
+  stem-separation drop gets sorted into the library, and
+  `assets/js/playback-engine.js`'s `setVocalDuckPredicate` for the
+  playback side.
+- A block-to-block crossfade smooths every transition, but a boundary
+  where the *musical style* actually changes (a Customize Genre Mix paint
+  boundary) gets a longer, more deliberate fade than a same-style segment
+  seam -- "jumping between genres" is a bigger audible event than a
+  same-recording gap patch, and sounds like one.
 - Sleep Mode: a full-screen, warm/dark night skin that plays the current
   selection hands-off, with a sleep timer (fade-out) and MediaSession
   lock-screen controls

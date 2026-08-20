@@ -45,7 +45,7 @@ export function makeSection({ book = "1 John", chapter = 1, versesWordCounts = [
  */
 export function makeFakeEngine({ blocks }) {
   const listeners = { blockchange: [], timeupdate: [], ended: [], playstate: [] };
-  const calls = { pause: 0, skipToBlock: [] };
+  const calls = { pause: 0, skipToBlock: [], setVocalDuckPredicate: [] };
   let currentBlock = null;
 
   return {
@@ -71,6 +71,9 @@ export function makeFakeEngine({ blocks }) {
     },
     skipToBlock(programIndex, time) {
       calls.skipToBlock.push({ programIndex, time });
+    },
+    setVocalDuckPredicate(predicate) {
+      calls.setVocalDuckPredicate.push(predicate);
     },
   };
 }

@@ -180,6 +180,15 @@ export function buildProgram(manifest, mix, selectedKeys, verseFilter) {
         style: styleId,
         take: recording.take,
         audioUrl: recording.audioUrl,
+        // Set only when this exact recording has separated stems (see
+        // AI_TODO.md item 10 / scripts/organize_stems.py) -- playback-engine.js
+        // uses these instead of audioUrl when both are present, so the
+        // vocal track can be ducked per blanked word; audioUrl stays on
+        // the block regardless, as the always-available fallback for
+        // anything that doesn't opt into ducking (Sleep Mode, Sing-Along,
+        // Type Ahead, or a stem-less recording).
+        instrumentalUrl: recording.instrumentalUrl ?? null,
+        vocalUrl: recording.vocalUrl ?? null,
         inTime,
         outTime,
         words,
