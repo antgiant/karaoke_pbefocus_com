@@ -832,7 +832,7 @@ treatment, and the starting values are all decided above.
 
 ---
 
-## 8. [ ] Fall back to the Pathfinder's selected default style, not alphabetical-first, when a section has no recording in the active style
+## 8. [x] Fall back to the Pathfinder's selected default style, not alphabetical-first, when a section has no recording in the active style
 
 **Goal:** When a section doesn't have a recording in the currently active/
 painted style, the program builder should fall back to the Pathfinder's
@@ -887,12 +887,26 @@ literal that can never match a real style id.
   de facto fallback today (alphabetically-first after the `(style, take)`
   sort); context only, no change needed here.
 
-**Open question:** confirm `buildProgram`'s call site(s) actually have
-`mix.defaultStyleId` in scope at the point `alignmentFor` needs it — if
-`program-builder.js` doesn't currently receive `mix` (only `section`/
-`styleId` per call), this needs a signature change to thread the
-Pathfinder's default style through, not just a one-line fix inside
-`alignmentFor`.
+**Open question (resolved):** `buildProgram(manifest, mix, selectedKeys,
+verseFilter)` already receives the whole `mix` object as its second
+parameter, and `alignmentFor` is a closure defined inside `buildProgram`'s
+per-section loop — so `mix.defaultStyleId` was already in scope right
+where it was needed. No signature change required, just the one-line fix.
+
+**Done.** Removed the dead `FALLBACK_STYLE_ID = "default"` constant.
+`program-builder.js`'s fallback chain now tries `mix.defaultStyleId` first
+(when set), then falls through to `section.recordings[0]` only as a true
+last resort (the default style itself has no recording in this section
+either). Also updated the file's top-of-function doc comment, which
+previously described the fallback as coming from "the reference
+('default') recording."
+
+Tests: `tests/program-builder.fallback.test.mjs` (new) — confirms a
+requested style with no recording in a section now falls back to
+`mix.defaultStyleId`'s recording rather than whichever recording is
+listed first in the manifest, and that the true last-resort
+(`section.recordings[0]`) still applies when even the default style has
+no recording there either. `npm test` passes (88/88, up from 86).
 
 ---
 

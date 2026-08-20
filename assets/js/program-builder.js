@@ -1,8 +1,6 @@
 import { alignWordsToCanonical, canonicalWords, orderedSections, passageLabel, pickRecording, sectionKey } from "./library.js";
 import { getRuns, getTakeRank } from "./mix.js";
 
-const FALLBACK_STYLE_ID = "default";
-
 /**
  * Flattens a selection + genre mix into an ordered playback program: one
  * block per contiguous run of canonical words that actually share the same
@@ -16,9 +14,11 @@ const FALLBACK_STYLE_ID = "default";
  *
  * Two things can make the *actual* audio source for a given canonical word
  * differ from what the mix nominally requested there, both handled the same
- * way -- patch that word in from the reference ("default") recording
- * instead of silently doing something worse -- and both reported via
- * `fallbacks` so the UI can tell the Pathfinder about it:
+ * way -- patch that word in from a reference recording (the Pathfinder's
+ * actual selected default style, `mix.defaultStyleId`, or failing that
+ * whichever recording happens to be first) instead of silently doing
+ * something worse -- and both reported via `fallbacks` so the UI can tell
+ * the Pathfinder about it:
  *
  * - The requested style has no recording for this section at all.
  * - The requested style's recording has a genuine alignment gap for that
@@ -64,7 +64,9 @@ export function buildProgram(manifest, mix, selectedKeys, verseFilter) {
       return result;
     }
 
-    const fallback = alignmentFor(FALLBACK_STYLE_ID) || (section.recordings[0] ? alignmentFor(section.recordings[0].style) : null);
+    const fallback =
+      (mix.defaultStyleId ? alignmentFor(mix.defaultStyleId) : null) ||
+      (section.recordings[0] ? alignmentFor(section.recordings[0].style) : null);
 
     // One resolved source per canonical index: which recording actually
     // supplies audio for that word, and why it differs from the request
