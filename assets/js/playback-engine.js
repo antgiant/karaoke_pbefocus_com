@@ -3,19 +3,20 @@
 // blocks (different recordings, so it's a smoothing touch, not a promise of
 // a studio-seamless splice -- see the mix-editor UX notes in the plan).
 //
-// Most blocks play through one plain <audio> element per slot, same as
-// always. A block that has separated instrumental/vocal stems (AI_TODO.md
-// item 10 -- recording.instrumentalUrl/vocalUrl, set by
-// scripts/organize_stems.py + build_manifest.py) AND whose caller has
-// opted into vocal ducking (see setVocalDuckPredicate) instead plays
-// through a *pair* of <audio> elements (instrumental + vocal) kept in sync,
-// with the vocal element's own volume faded toward 0 while the current
-// word is "blanked" per the duck predicate -- true "guess the words"
-// recall, not just "don't read ahead" (Karaoke Mode's existing visual-only
-// blanking, study-modes/unscored.js). Every block without stems, and every
-// caller that never sets a duck predicate (Sleep Mode, Sing-Along, Type
-// Ahead), plays exactly as before -- this is additive, not a rewrite of the
-// common path.
+// Every recording in the library is a separated instrumental/vocal stem
+// pair (scripts/separate_stems.py + build_manifest.py -- see AGENTS.md; the
+// original single-track full mix is deleted once separation succeeds, so
+// there's no plain-audio fallback to fall back to). Every block therefore
+// always plays through a *pair* of <audio> elements (instrumental + vocal)
+// kept in sync. Normally both play at the same volume -- together they
+// sound like the original full mix. A caller that's opted into vocal
+// ducking (see setVocalDuckPredicate, used by Karaoke Mode's "fade out the
+// sung words when blanked" checkbox, study-modes/unscored.js) additionally
+// fades the vocal element's own volume toward 0 while the current word is
+// "blanked" per the duck predicate -- true "guess the words" recall, not
+// just "don't read ahead" (Karaoke Mode's existing visual-only blanking).
+// Every caller that never sets a duck predicate (Sleep Mode, Sing-Along,
+// Type Ahead) just hears both tracks at full volume throughout.
 
 const SEGMENT_CROSSFADE_SECONDS = 0.35; // same-style segment boundary (a click-avoidance blip, not a real transition)
 const GENRE_CROSSFADE_SECONDS = 1.5; // the style actually changes between blocks -- "jumping between genres" deserves an audible, deliberate fade
@@ -37,11 +38,6 @@ export function wordIndexAtTime(words, t) {
     }
   }
   return result;
-}
-
-/** True when `block` should play through a synced instrumental+vocal pair instead of its plain audioUrl -- both stems must exist AND a duck predicate must be set (see setVocalDuckPredicate); a block with stems still plays plain audio when no predicate is active, e.g. Sleep Mode/Sing-Along/Type Ahead, which never set one. */
-export function shouldUseStem(block, duckPredicate) {
-  return !!(duckPredicate && block?.instrumentalUrl && block?.vocalUrl);
 }
 
 /**
@@ -137,61 +133,8 @@ export function seekReliably(el, time) {
   });
 }
 
-/** A single plain <audio> element wrapped in the small interface both playFromBlock/tick's crossfade math and the stem source below share. */
-function makePlainSource() {
-  const el = new Audio();
-  el.preload = "auto";
-  let envelopeVolume = 0;
-
-  return {
-    kind: "plain",
-    primaryEl: el,
-    get src() {
-      return el.src;
-    },
-    get currentTime() {
-      return el.currentTime;
-    },
-    get ended() {
-      return el.ended;
-    },
-    get volume() {
-      return envelopeVolume;
-    },
-    setUrls(audioUrl) {
-      if (el.src !== audioUrl) el.src = audioUrl;
-    },
-    load() {
-      el.load();
-    },
-    unload() {
-      el.pause();
-      el.removeAttribute("src");
-      el.load();
-    },
-    async seekAndPlay(time) {
-      await seekReliably(el, time);
-      el.play().catch(() => {});
-    },
-    play() {
-      el.play().catch(() => {});
-    },
-    pause() {
-      el.pause();
-    },
-    setVolume(v) {
-      envelopeVolume = v;
-      el.volume = v;
-    },
-    stepDuck() {
-      // Plain sources have nothing to duck -- the whole mix is one track.
-    },
-    resyncIfDrifted() {},
-  };
-}
-
-/** A synced instrumental+vocal pair for a block with separated stems -- see the file-top comment. Timing (word-level ducking) is driven by the *same* recording.words the plain path already uses, since both stems share the original recording's word timing. */
-function makeStemSource() {
+/** A synced instrumental+vocal pair -- every block plays through one of these (see the file-top comment). Normally both elements play at the same volume (envelopeVolume); a caller that's set a duck predicate additionally scales the vocal element by duckFactor, faded toward its target over DUCK_TIME_CONSTANT_SECONDS. Timing (word-level ducking) is driven by the block's own recording.words, since both stems share the original recording's word timing. */
+function makeSource() {
   const instrumentalEl = new Audio();
   const vocalEl = new Audio();
   instrumentalEl.preload = "auto";
@@ -206,8 +149,6 @@ function makeStemSource() {
   }
 
   return {
-    kind: "stem",
-    primaryEl: instrumentalEl,
     get src() {
       return instrumentalEl.src;
     },
@@ -272,14 +213,9 @@ function makeStemSource() {
 }
 
 export function createPlaybackEngine() {
-  // Two slots (today's "active"/"standby" elements), each able to hold
-  // either kind of source -- which kind a slot is currently wearing is
-  // decided per-block by loadSourceForBlock(), based on whether that block
-  // has stems *and* a duck predicate is set.
-  const slots = [
-    { plain: makePlainSource(), stem: makeStemSource(), current: "plain" },
-    { plain: makePlainSource(), stem: makeStemSource(), current: "plain" },
-  ];
+  // Two slots (today's "active"/"standby" elements), each a synced
+  // instrumental+vocal pair -- see makeSource().
+  const slots = [makeSource(), makeSource()];
 
   let activeIdx = 0;
   let program = { blocks: [] };
@@ -297,25 +233,15 @@ export function createPlaybackEngine() {
     for (const fn of listeners[event]) fn(...args);
   }
 
-  const activeSlot = () => slots[activeIdx];
-  const standbySlot = () => slots[1 - activeIdx];
-  const activeSource = () => activeSlot()[activeSlot().current];
-  const standbySource = () => standbySlot()[standbySlot().current];
+  const activeSource = () => slots[activeIdx];
+  const standbySource = () => slots[1 - activeIdx];
   const currentBlock = () => program.blocks[blockIndex] ?? null;
-
-  /** Sets `slot`'s current source (plain or stem, per the block) to `block`'s URLs, returning that source. Does not touch playback state. */
-  function loadSourceForBlock(slot, block) {
-    slot.current = shouldUseStem(block, duckPredicate) ? "stem" : "plain";
-    const source = slot[slot.current];
-    if (slot.current === "stem") source.setUrls(block.instrumentalUrl, block.vocalUrl);
-    else source.setUrls(block.audioUrl);
-    return source;
-  }
 
   function preloadNext() {
     const next = program.blocks[blockIndex + 1];
     if (!next) return;
-    const source = loadSourceForBlock(standbySlot(), next);
+    const source = standbySource();
+    source.setUrls(next.instrumentalUrl, next.vocalUrl);
     source.setVolume(0);
     source.load();
   }
@@ -354,17 +280,13 @@ export function createPlaybackEngine() {
   function finish() {
     isPlaying = false;
     cancelLoop();
-    for (const slot of slots) {
-      slot.plain.pause();
-      slot.stem.pause();
-    }
+    for (const slot of slots) slot.pause();
     emit("ended");
     emit("playstate", false);
   }
 
-  /** For a stem-source block, moves the vocal element's volume toward 0 (blanked) or 1 (audible) based on which word `t` currently falls in and the duck predicate -- a no-op for plain sources. */
+  /** Moves `source`'s vocal element's volume toward 0 (blanked) or 1 (audible) based on which word `t` currently falls in and the duck predicate. */
   function updateDucking(source, block, t, dtSeconds) {
-    if (source.kind !== "stem") return;
     source.setDuckTarget(duckTargetFor(block, t, duckPredicate));
     source.stepDuck(dtSeconds);
     source.resyncIfDrifted();
@@ -421,10 +343,7 @@ export function createPlaybackEngine() {
     // reproducible against a plain dev server without Range support) never
     // resolve loadedmetadata for a second simultaneous request to an
     // identical URL, which would otherwise hang a manual skip forever.
-    const wantsStem = shouldUseStem(block, duckPredicate);
-    const standbyMatches =
-      standbySlot().current === (wantsStem ? "stem" : "plain") &&
-      standbySource().src === (wantsStem ? block.instrumentalUrl : block.audioUrl);
+    const standbyMatches = standbySource().src === block.instrumentalUrl;
 
     let source;
     if (standbyMatches) {
@@ -432,11 +351,9 @@ export function createPlaybackEngine() {
       activeIdx = 1 - activeIdx;
       source = activeSource();
     } else {
-      for (const slot of slots) {
-        slot.plain.pause();
-        slot.stem.pause();
-      }
-      source = loadSourceForBlock(activeSlot(), block);
+      for (const slot of slots) slot.pause();
+      source = activeSource();
+      source.setUrls(block.instrumentalUrl, block.vocalUrl);
     }
 
     blockIndex = index;
@@ -460,11 +377,7 @@ export function createPlaybackEngine() {
 
     loadProgram(newProgram) {
       cancelLoop();
-      for (const slot of slots) {
-        slot.plain.unload();
-        slot.stem.unload();
-        slot.current = "plain";
-      }
+      for (const slot of slots) slot.unload();
       program = newProgram;
       blockIndex = -1;
       crossfading = false;
@@ -472,14 +385,12 @@ export function createPlaybackEngine() {
     },
 
     /**
-     * Opts into per-word vocal ducking for any upcoming block that has
-     * separated stems (AI_TODO.md item 10) -- `predicate(canonicalWordIndex)`
+     * Opts into per-word vocal ducking -- `predicate(canonicalWordIndex)`
      * returns true for a word that should be silent in the vocal track
-     * right now. Pass null (the default) to turn ducking off; blocks then
-     * always play their plain, single-track audioUrl regardless of
-     * whether stems exist for them. Only takes effect for blocks loaded
-     * *after* the call (the currently-active block, if any, keeps
-     * whichever source kind it already started with) -- study-modes/
+     * right now. Pass null (the default) to turn ducking off; the vocal
+     * track then just plays at full volume alongside the instrumental
+     * throughout, same as any block during a stretch with no blanked words.
+     * Only takes effect for blocks loaded *after* the call -- study-modes/
      * unscored.js calls this once per section change, which is always
      * before the next block starts.
      */

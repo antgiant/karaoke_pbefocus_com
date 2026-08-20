@@ -88,47 +88,34 @@ Pathfinder can turn the vocals down (or off) relative to the music while
 falling asleep, instead of only the single overall volume Sleep Mode has
 today.
 
-**Current state (verified against code):** `sleep-mode.js` reuses
+**Current state (verified against code, post stem-pipeline overhaul --
+every recording in the library is now a separated instrumental/vocal stem
+pair, see AGENTS.md):** `playback-engine.js` already always plays every
+block through a synced instrumental+vocal pair (`makeSource()`) -- there's
+no more single-track/dual-track branching, so Sleep Mode already gets a
+dual-track source for free, same as every other mode. `sleep-mode.js` reuses
 `mountUnscored` with a fixed `PLAIN_KARAOKE_OPTIONS = () =>
-({ blankFraction: 0 })` (`sleep-mode.js:10`) -- no `duckVocals` key, so it's
-always falsy, meaning Sleep Mode never opts into the stem/dual-track
-playback path at all (`shouldUseStem()` in `playback-engine.js` requires a
-truthy duck predicate). Every Sleep Mode session plays each block's plain
-`audioUrl` (the single full mix) through one `<audio>` element per
-crossfade slot, same as any other non-stem-aware mode. The engine's only
-existing volume control is `setMasterVolume(v)` (`playback-engine.js`) --
-one overall multiplier, used today for the sleep timer's fade-out
-(`sleep-mode.js:80,85,156`) -- there's no concept of two independently
-controllable tracks anywhere Sleep Mode touches.
+({ blankFraction: 0 })` (`sleep-mode.js:10`) -- no `duckVocals` key, so it
+never sets a duck predicate, meaning the vocal element's `duckFactor` just
+stays at 1 (full volume) throughout, same as the instrumental. The engine's
+only existing volume control is `setMasterVolume(v)` (`playback-engine.js`)
+-- one overall multiplier applied to *both* tracks together, used today for
+the sleep timer's fade-out (`sleep-mode.js:80,85,156`) -- there's no concept
+of two independently controllable tracks anywhere Sleep Mode touches.
 
-**Why this doesn't reuse the existing stem-ducking machinery as-is:**
-`playback-engine.js`'s stem source (`makeStemSource()`) already plays
-instrumental and vocal as a synced pair when both a block has stems *and*
-a duck predicate is set (`setVocalDuckPredicate`, added for Karaoke Mode's
-"fade out the sung words when blanked" checkbox) -- but that predicate is
-inherently a per-word, playback-position-driven boolean (`duckTargetFor()`
-asks "is *this* word blanked right now"), not a flat, Pathfinder-set
-level. Sleep Mode's two sliders are a different shape of control -- a
-constant multiplier per track, set once (or adjusted live) by the
-Pathfinder, with no per-word logic involved at all. The stem source
-internally already separates `envelopeVolume` (the crossfade-driven
-volume, shared by both tracks) from `duckFactor` (the vocal-only
-multiplier) -- the natural extension is a similar independent multiplier
-per track that Sleep Mode's sliders drive directly, alongside (not
-replacing) the existing duck-predicate path Karaoke Mode uses. Needs a new
-engine API (e.g. something like `setStemTrackVolumes({ instrumental, vocal })`)
-and a way for a caller to opt into the stem source *without* a duck
-predicate (today `shouldUseStem()` treats "predicate is set" as the only
-signal that stems are wanted at all, conflating "wants stems" with "wants
-word-level ducking" -- these need to become two separate questions).
+**What this needs:** a new engine API (e.g. something like
+`setStemTrackVolumes({ instrumental, vocal })`) for a flat, Pathfinder-set
+multiplier per track, independent of `setVocalDuckPredicate`'s per-word
+boolean (Karaoke Mode's "fade out the sung words when blanked" checkbox) --
+the source already separates `envelopeVolume` (the crossfade-driven volume,
+shared by both tracks) from `duckFactor` (the vocal-only multiplier), so
+this is a fairly direct extension: a second per-track multiplier that
+Sleep Mode's sliders drive directly, alongside (not replacing) the
+duck-predicate path Karaoke Mode uses. Since every recording now has stems,
+there's no longer a "what about a recording with no stems" question to
+resolve -- the sliders can just always be available.
 
 **Open questions:**
-- Only stem-backed recordings can honor a vocal slider at all (most of the
-  library still doesn't have stems -- see AI_TODO.md's prior stem-audio
-  work). What should Sleep Mode show/do for a block with no stems -- hide
-  the vocal slider entirely for that block, disable it with an
-  explanation, or leave it visually present but inert? Needs a decision,
-  not a guess.
 - Should the two sliders persist per playlist (like every other Karaoke
   Mode setting) or be a Sleep-Mode-session-only preference that resets
   each time?
@@ -138,6 +125,6 @@ word-level ducking" -- these need to become two separate questions).
 
 **Relevant files:** `assets/js/sleep-mode.js` (`PLAIN_KARAOKE_OPTIONS`,
 the volume/fade-out wiring), `assets/js/playback-engine.js`
-(`makeStemSource()`, `shouldUseStem()`, `setVocalDuckPredicate`,
-`setMasterVolume`), `assets/js/playlists.js` (`defaultStudyOptions()`, if
-these end up persisted like `duckVocals`).
+(`makeSource()`, `setVocalDuckPredicate`, `setMasterVolume`),
+`assets/js/playlists.js` (`defaultStudyOptions()`, if these end up
+persisted like `duckVocals`).

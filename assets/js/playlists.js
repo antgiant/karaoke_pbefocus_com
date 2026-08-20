@@ -32,7 +32,7 @@ export function defaultStudyOptions() {
     lengthMatched: false,
     scored: false,
     scoredInput: null,
-    duckVocals: false, // AI_TODO.md item 10 -- off by default: only a handful of recordings have stems so far, and it's a new/experimental effect
+    duckVocals: false, // off by default -- a genuine "guess the words" recall mode, not what most Pathfinders expect out of the box
   };
 }
 

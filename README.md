@@ -77,15 +77,13 @@ its output never belong in this public repo (see `.gitignore`).
   ahead of playback" mechanic was removed outright in the redesign, not
   carried forward.) An additional "Also fade out the sung words when
   blanked (where available)" checkbox extends the blanking from the
-  on-screen text to the actual audio -- for whichever recordings have
-  separated instrumental/vocal stems (a growing but still small subset of
-  the library), the vocal track fades toward silence for exactly the
-  words currently blanked, true "guess the words" recall rather than just
-  "don't read ahead." Off by default (only takes effect for a stem-backed
-  recording, otherwise a no-op). See `scripts/organize_stems.py` for how a
-  stem-separation drop gets sorted into the library, and
-  `assets/js/playback-engine.js`'s `setVocalDuckPredicate` for the
-  playback side.
+  on-screen text to the actual audio -- every recording in the library is a
+  separated instrumental/vocal stem pair (see AGENTS.md's pipeline), so the
+  vocal track fades toward silence for exactly the words currently blanked,
+  true "guess the words" recall rather than just "don't read ahead." Off by
+  default. See `scripts/separate_stems.py` for how the stems themselves get
+  produced, and `assets/js/playback-engine.js`'s `setVocalDuckPredicate` for
+  the playback side.
 - A block-to-block crossfade smooths every transition, but a boundary
   where the *musical style* actually changes (a Customize Genre Mix paint
   boundary) gets a longer, more deliberate fade than a same-style segment

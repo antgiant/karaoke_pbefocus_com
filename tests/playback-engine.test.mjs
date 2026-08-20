@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { wordIndexAtTime, shouldUseStem, crossfadeSecondsFor, duckTargetFor } from "../assets/js/playback-engine.js";
+import { wordIndexAtTime, crossfadeSecondsFor, duckTargetFor } from "../assets/js/playback-engine.js";
 
 test("wordIndexAtTime: finds the last word whose start <= t", () => {
   const words = [{ start: 0 }, { start: 1 }, { start: 2 }, { start: 3 }];
@@ -22,28 +22,10 @@ function makeBlock(overrides = {}) {
     style: overrides.style ?? "hiphop",
     inTime: overrides.inTime ?? 0,
     outTime: overrides.outTime ?? 3,
-    instrumentalUrl: overrides.instrumentalUrl,
-    vocalUrl: overrides.vocalUrl,
     words,
     canonicalIndexMap,
   };
 }
-
-test("shouldUseStem: needs both stem URLs AND an active duck predicate", () => {
-  const stemBlock = makeBlock({ instrumentalUrl: "i.mp3", vocalUrl: "v.mp3" });
-  const plainBlock = makeBlock();
-  const predicate = () => true;
-
-  assert.equal(shouldUseStem(stemBlock, predicate), true);
-  assert.equal(shouldUseStem(stemBlock, null), false, "no predicate -- Sleep Mode/Sing-Along/Type Ahead never set one");
-  assert.equal(shouldUseStem(plainBlock, predicate), false, "predicate alone isn't enough without both stem URLs");
-  assert.equal(shouldUseStem(makeBlock({ instrumentalUrl: "i.mp3" }), predicate), false, "only one stem present");
-});
-
-test("shouldUseStem: tolerates a null/undefined block", () => {
-  assert.equal(shouldUseStem(null, () => true), false);
-  assert.equal(shouldUseStem(undefined, () => true), false);
-});
 
 test("crossfadeSecondsFor: same style -> the short segment blip", () => {
   const prev = makeBlock({ style: "hiphop", inTime: 0, outTime: 30 });

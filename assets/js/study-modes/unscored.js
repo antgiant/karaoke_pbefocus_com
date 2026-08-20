@@ -31,12 +31,9 @@ const RAMP_STEP_PER_REPEAT = 0.2;
  * "Blackout Ramp" behavior, now just a checkbox alongside the slider
  * rather than a separate mode.
  *
- * getOptions().duckVocals (AI_TODO.md item 10) additionally fades a
- * blanked word's *sung* audio toward silence, not just its on-screen
- * text -- but only for whichever blocks actually have separated
- * instrumental/vocal stems (most don't yet); everything else keeps
- * playing its one full-mix recording exactly as before. See
- * playback-engine.js's setVocalDuckPredicate.
+ * getOptions().duckVocals additionally fades a blanked word's *sung* audio
+ * toward silence, not just its on-screen text -- true "guess the words"
+ * recall. See playback-engine.js's setVocalDuckPredicate.
  */
 export function mountUnscored(container, engine, manifest, mix, getOptions, verseFilter) {
   const view = createPassageView(container, engine, manifest, mix, verseFilter);
@@ -50,13 +47,13 @@ export function mountUnscored(container, engine, manifest, mix, getOptions, vers
   // effect on the next "Start Studying" click, which tears down this mount
   // and creates a fresh one). Registered immediately -- before onSectionChange
   // has fired even once -- rather than reactively inside it below, because
-  // of an ordering constraint: the engine decides plain-vs-stem for a block
+  // of an ordering constraint: the engine loads a block's stem pair
   // *before* it emits "blockchange" (a block has to be loaded before
   // anything can react to it starting), but onSectionChange only fires
   // *from* that same blockchange event. A predicate set reactively there
   // would always be one block too late -- the very first block of every
-  // section would incorrectly play its plain audioUrl even with stems
-  // available and duckVocals on. The closure below still reads live
+  // section would incorrectly play its vocal undimmed even with duckVocals
+  // on. The closure below still reads live
   // `hinted`, so it's accurate by the time it's actually *called* (from
   // playback-engine.js's tick(), well after this section's own
   // onSectionChange has already run and updated `hinted`) -- only the

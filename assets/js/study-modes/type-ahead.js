@@ -3,12 +3,17 @@
  * waits for the Pathfinder to type that upcoming word correctly before
  * continuing into it -- active recall, not passive highlighting.
  *
- * This drives its own single <audio> element rather than the shared
+ * This drives its own pair of <audio> elements rather than the shared
  * crossfade playback-engine: that engine is built for continuous
  * multi-block playback and has no concept of "pause and wait right here,"
  * whereas type-ahead is inherently stop-start, so grafting pause points
  * onto the shared engine's per-frame tick loop would fight its own
- * auto-advance logic. Takes the program directly instead of an engine.
+ * auto-advance logic. Takes the program directly instead of an engine. A
+ * pair rather than one element because every recording in the manifest is a
+ * separated instrumental/vocal stem pair (scripts/separate_stems.py +
+ * build_manifest.py, see AGENTS.md) -- there's no single-track audioUrl any
+ * more, so both elements are kept in lockstep (play/pause/seek together, at
+ * full volume throughout -- this mode never ducks) to sound like one track.
  */
 import { seekReliably } from "../playback-engine.js";
 import { maskedText } from "./masking.js";
@@ -41,7 +46,8 @@ export function mountTypeAhead(container, program, getLengthMatched = () => fals
   scoreEl.className = "singalong-score";
   container.append(heading, scoreEl, stream, form);
 
-  const audio = new Audio();
+  const instrumentalEl = new Audio();
+  const vocalEl = new Audio();
   let wordEls = [];
   let words = [];
   let revealed = new Set();
@@ -125,11 +131,12 @@ export function mountTypeAhead(container, program, getLengthMatched = () => fals
 
   function playUntil(stopTime) {
     return new Promise((resolve) => {
-      if (cancelled || audio.currentTime >= stopTime) {
+      if (cancelled || instrumentalEl.currentTime >= stopTime) {
         resolve();
         return;
       }
-      audio.play().catch(() => {});
+      instrumentalEl.play().catch(() => {});
+      vocalEl.play().catch(() => {});
       function check() {
         if (cancelled) {
           resolve();
@@ -137,12 +144,13 @@ export function mountTypeAhead(container, program, getLengthMatched = () => fals
         }
         let idx = -1;
         for (let i = 0; i < words.length; i++) {
-          if (words[i].start <= audio.currentTime) idx = i;
+          if (words[i].start <= instrumentalEl.currentTime) idx = i;
           else break;
         }
         highlightThrough(idx);
-        if (audio.currentTime >= stopTime || audio.ended) {
-          audio.pause();
+        if (instrumentalEl.currentTime >= stopTime || instrumentalEl.ended) {
+          instrumentalEl.pause();
+          vocalEl.pause();
           resolve();
           return;
         }
@@ -186,13 +194,17 @@ export function mountTypeAhead(container, program, getLengthMatched = () => fals
     });
   }
 
-  async function loadMetadata(url) {
-    if (audio.src === url && audio.readyState >= 1) return;
-    audio.src = url;
+  async function loadOne(el, url) {
+    if (el.src === url && el.readyState >= 1) return;
+    el.src = url;
     await new Promise((resolve) => {
-      if (audio.readyState >= 1) resolve();
-      else audio.addEventListener("loadedmetadata", resolve, { once: true });
+      if (el.readyState >= 1) resolve();
+      else el.addEventListener("loadedmetadata", resolve, { once: true });
     });
+  }
+
+  async function loadMetadata(instrumentalUrl, vocalUrl) {
+    await Promise.all([loadOne(instrumentalEl, instrumentalUrl), loadOne(vocalEl, vocalUrl)]);
   }
 
   async function runBlock(index) {
@@ -206,9 +218,9 @@ export function mountTypeAhead(container, program, getLengthMatched = () => fals
     }
     form.hidden = false;
     renderWords(block);
-    await loadMetadata(block.audioUrl);
+    await loadMetadata(block.instrumentalUrl, block.vocalUrl);
     if (cancelled) return;
-    await seekReliably(audio, block.inTime);
+    await Promise.all([seekReliably(instrumentalEl, block.inTime), seekReliably(vocalEl, block.inTime)]);
     if (cancelled) return;
 
     const scriptureIndices = words.map((w, i) => (w.verse !== null ? i : -1)).filter((i) => i >= 0);
@@ -237,6 +249,7 @@ export function mountTypeAhead(container, program, getLengthMatched = () => fals
 
   return function unmount() {
     cancelled = true;
-    audio.pause();
+    instrumentalEl.pause();
+    vocalEl.pause();
   };
 }

@@ -25,8 +25,8 @@ function makeManifest() {
     recordings: [
       // Listed first -- an old, dead "section.recordings[0]" fallback
       // would land here regardless of the Pathfinder's actual choice.
-      { style: "broadway", take: 1, audioUrl: "broadway.mp3", words },
-      { style: "hiphop", take: 1, audioUrl: "hiphop.mp3", words },
+      { style: "broadway", take: 1, instrumentalUrl: "broadway.instrumental.m4a", vocalUrl: "broadway.vocal.m4a", words },
+      { style: "hiphop", take: 1, instrumentalUrl: "hiphop.instrumental.m4a", vocalUrl: "hiphop.vocal.m4a", words },
     ],
   };
   return { styles: [{ id: "broadway", label: "Broadway" }, { id: "hiphop", label: "Hip Hop" }], sections: [section] };
@@ -44,7 +44,7 @@ test("buildProgram falls back to the Pathfinder's actual default style, not sect
   const program = buildProgram(manifest, mix, selected);
   assert.equal(program.blocks.length, 1);
   assert.equal(program.blocks[0].style, "hiphop", "should fall back to the Pathfinder's default style, not the first-listed recording");
-  assert.equal(program.blocks[0].audioUrl, "hiphop.mp3");
+  assert.equal(program.blocks[0].instrumentalUrl, "hiphop.instrumental.m4a");
   assert.equal(program.fallbacks[0].usedStyle, "hiphop");
   assert.equal(program.fallbacks[0].requestedStyle, "reggaeton");
 });

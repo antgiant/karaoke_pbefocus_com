@@ -14,7 +14,8 @@ function makeManifest() {
       {
         style: "hiphop",
         take: 1,
-        audioUrl: "take1.mp3",
+        instrumentalUrl: "take1.instrumental.m4a",
+        vocalUrl: "take1.vocal.m4a",
         words: [
           { word: "In", start: 0, end: 0.5, verse: 1 },
           { word: "the", start: 0.5, end: 1, verse: 1 },
@@ -23,7 +24,8 @@ function makeManifest() {
       {
         style: "hiphop",
         take: 2,
-        audioUrl: "take2.mp3",
+        instrumentalUrl: "take2.instrumental.m4a",
+        vocalUrl: "take2.vocal.m4a",
         words: [
           { word: "In", start: 10, end: 10.5, verse: 1 },
           { word: "the", start: 10.5, end: 11, verse: 1 },
@@ -42,7 +44,7 @@ test("buildProgram picks the lowest take by default, matching pre-item-6 behavio
   syncMixToSelection(mix, manifest, selected);
 
   const program = buildProgram(manifest, mix, selected);
-  assert.equal(program.blocks[0].audioUrl, "take1.mp3");
+  assert.equal(program.blocks[0].instrumentalUrl, "take1.instrumental.m4a");
   assert.equal(program.blocks[0].take, 1);
 });
 
@@ -55,7 +57,7 @@ test("buildProgram honors mix.defaultTakeRank for the whole playlist", () => {
   setDefaultTakeRank(mix, 1);
 
   const program = buildProgram(manifest, mix, selected);
-  assert.equal(program.blocks[0].audioUrl, "take2.mp3");
+  assert.equal(program.blocks[0].instrumentalUrl, "take2.instrumental.m4a");
   assert.equal(program.blocks[0].take, 2);
 });
 
@@ -69,5 +71,5 @@ test("buildProgram: a per-(section, style) override wins over the playlist defau
   setTakeRank(mix, key, "hiphop", 0); // pin this specific section+style back to take 1
 
   const program = buildProgram(manifest, mix, selected);
-  assert.equal(program.blocks[0].audioUrl, "take1.mp3");
+  assert.equal(program.blocks[0].instrumentalUrl, "take1.instrumental.m4a");
 });

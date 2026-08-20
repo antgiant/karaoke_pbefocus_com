@@ -24,7 +24,7 @@ export function makeSection({ book = "1 John", chapter = 1, versesWordCounts = [
     chapter,
     verseStart: null,
     verseEnd: null,
-    recordings: [{ style, take: 1, audioUrl: "test.mp3", words }],
+    recordings: [{ style, take: 1, instrumentalUrl: "test.instrumental.m4a", vocalUrl: "test.vocal.m4a", words }],
   };
   return { section, words };
 }
