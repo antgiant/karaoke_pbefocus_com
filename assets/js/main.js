@@ -1,5 +1,5 @@
 import { buildBookTree, formatDuration, formatVerseRanges } from "./library.js";
-import { churchFitText } from "./style-fit.js";
+import { churchFitDescription, churchFitEmoji } from "./style-fit.js";
 import { initGate } from "./gate.js";
 import { loadState, saveState, SCHEMA_VERSION } from "./storage.js";
 import { MANIFEST_URL_PARAM, PLAYLIST_URL_PARAM } from "./constants.js";
@@ -255,23 +255,48 @@ function renderBookTree(manifest, selected, verseSelections, onChange) {
   }
 }
 
+/**
+ * Updates the small badge next to the style <select> to reflect whichever
+ * style is currently selected -- the church-fit emoji, with the full
+ * phrase as both a `title` (mouse hover) and an `aria-label` (since `title`
+ * alone is announced inconsistently by screen readers, and this badge is
+ * the only place that information lives now that it's out of the
+ * <option> text). See AI_TODO.md's UI-cleanup note: putting the full
+ * "<emoji> <phrase>" text in every <option> (the original design) made
+ * the closed <select> render far too wide on mobile, since it sizes to
+ * its longest option.
+ */
+function updateStyleFitBadge(manifest, styleId) {
+  const badge = document.getElementById("styleFitBadge");
+  const style = manifest.styles.find((s) => s.id === styleId);
+  const description = style?.churchFit ? churchFitDescription(style.churchFit) : "";
+  badge.textContent = style?.churchFit ? churchFitEmoji(style.churchFit) : "";
+  badge.title = description;
+  badge.setAttribute("aria-label", description ? `Church fit: ${description}` : "");
+  badge.hidden = !description;
+}
+
 function renderStyleOptions(manifest, selectedStyleId) {
   const select = document.getElementById("styleSelect");
   select.innerHTML = "";
   for (const style of manifest.styles) {
     const option = document.createElement("option");
     option.value = style.id;
-    // "<vibe emoji> <label> — <church-fit emoji + phrase>" -- self-contained
-    // plain text (see AI_TODO.md item 7): a native <option> can't carry a
-    // separate tooltip, so both pieces of signal have to live in the text
-    // itself. Degrades to just the label if a style has no emoji/churchFit
-    // (e.g. a manifest built before this field existed).
+    // Just "<vibe emoji> <label>" -- the church-fit phrase used to be
+    // appended here too, but that made the closed <select> render far too
+    // wide on mobile (it sizes to its longest option's text). The emoji +
+    // full phrase now live in the #styleFitBadge next to the dropdown
+    // (updateStyleFitBadge) instead, plus a per-option `title` here as a
+    // bonus hover tooltip on desktop browsers that render one (most do;
+    // it's inert, not broken, on ones that don't -- the badge is the
+    // reliable source either way).
     const vibe = style.emoji ? `${style.emoji} ` : "";
-    const fit = style.churchFit ? ` — ${churchFitText(style.churchFit)}` : "";
-    option.textContent = `${vibe}${style.label}${fit}`;
+    option.textContent = `${vibe}${style.label}`;
+    if (style.churchFit) option.title = churchFitDescription(style.churchFit);
     select.appendChild(option);
   }
   select.value = selectedStyleId;
+  updateStyleFitBadge(manifest, selectedStyleId);
   return select;
 }
 
@@ -388,6 +413,7 @@ function initSelectionUi(manifest, manifestUrl) {
 
   styleSelect.addEventListener("change", () => {
     setDefaultStyle(mix, styleSelect.value);
+    updateStyleFitBadge(manifest, styleSelect.value);
     persistActivePlaylist();
     renderMixEditorIfOpen();
   });
@@ -421,6 +447,7 @@ function initSelectionUi(manifest, manifestUrl) {
     activePlaylistId = id;
     loadActivePlaylistIntoMemory();
     styleSelect.value = mix.defaultStyleId; // same manifest/style list across playlists -- just move the selection
+    updateStyleFitBadge(manifest, mix.defaultStyleId);
     defaultTakeCheckbox.checked = (mix.defaultTakeRank ?? 0) > 0;
     syncStudyOptionsFromActivePlaylist();
     renderPlaylistSelect();
@@ -463,6 +490,7 @@ function initSelectionUi(manifest, manifestUrl) {
     activePlaylistId = deletePlaylist(playlists, activePlaylistId);
     loadActivePlaylistIntoMemory();
     styleSelect.value = mix.defaultStyleId;
+    updateStyleFitBadge(manifest, mix.defaultStyleId);
     defaultTakeCheckbox.checked = (mix.defaultTakeRank ?? 0) > 0;
     syncStudyOptionsFromActivePlaylist();
     renderPlaylistSelect();
