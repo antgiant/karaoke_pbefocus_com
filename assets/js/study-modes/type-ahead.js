@@ -18,7 +18,7 @@
 import { seekReliably } from "../playback-engine.js";
 import { maskedText } from "./masking.js";
 
-export function mountTypeAhead(container, program, getLengthMatched = () => false) {
+export function mountTypeAhead(container, program, getLengthMatched = () => false, onAttempt) {
   container.innerHTML = "";
   container.className = "typeahead-view";
 
@@ -54,6 +54,23 @@ export function mountTypeAhead(container, program, getLengthMatched = () => fals
   let cancelled = false;
   let correctFirstTry = 0;
   let totalGated = 0;
+
+  // The displayed score above is a running total across the whole session
+  // (possibly several sections back to back), but practice history is
+  // per-section -- these track just the section currently in progress,
+  // flushed to history whenever a new section's blocks start (see
+  // flushSection) rather than only at the very end.
+  let sectionCorrect = 0;
+  let sectionTotal = 0;
+  let currentSectionKey = null;
+
+  function flushSection() {
+    if (currentSectionKey && sectionTotal > 0) {
+      onAttempt?.(currentSectionKey, "typeahead", sectionCorrect / sectionTotal);
+    }
+    sectionCorrect = 0;
+    sectionTotal = 0;
+  }
 
   function updateScoreDisplay() {
     if (totalGated === 0) {
@@ -180,7 +197,11 @@ export function mountTypeAhead(container, program, getLengthMatched = () => fals
           input.disabled = true;
           feedback.textContent = "";
           totalGated += 1;
-          if (wrongAttempts === 0) correctFirstTry += 1;
+          sectionTotal += 1;
+          if (wrongAttempts === 0) {
+            correctFirstTry += 1;
+            sectionCorrect += 1;
+          }
           updateScoreDisplay();
           resolve();
         } else {
@@ -211,10 +232,15 @@ export function mountTypeAhead(container, program, getLengthMatched = () => fals
     if (cancelled) return;
     const block = program.blocks[index];
     if (!block) {
+      flushSection();
       heading.textContent = "Finished!";
       stream.innerHTML = "";
       form.hidden = true;
       return;
+    }
+    if (block.sectionKey !== currentSectionKey) {
+      flushSection();
+      currentSectionKey = block.sectionKey;
     }
     form.hidden = false;
     renderWords(block);
@@ -249,6 +275,7 @@ export function mountTypeAhead(container, program, getLengthMatched = () => fals
 
   return function unmount() {
     cancelled = true;
+    flushSection();
     instrumentalEl.pause();
     vocalEl.pause();
   };

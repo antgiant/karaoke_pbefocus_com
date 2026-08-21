@@ -1,3 +1,4 @@
+import { sectionKey } from "../library.js";
 import { createScorer } from "../stt-score.js";
 import { createPassageView } from "./word-stream.js";
 
@@ -17,7 +18,7 @@ export function isSingAlongSupported() {
  * plain explanation instead of a mic button on browsers without
  * SpeechRecognition (notably Firefox).
  */
-export function mountSingAlong(container, engine, manifest, mix, verseFilter) {
+export function mountSingAlong(container, engine, manifest, mix, verseFilter, onAttempt) {
   if (!isSingAlongSupported()) {
     container.innerHTML = "";
     const note = document.createElement("p");
@@ -53,6 +54,8 @@ export function mountSingAlong(container, engine, manifest, mix, verseFilter) {
   container.append(scoreEl, micBtn, statusEl);
 
   let scorer = null;
+  let currentKey = null;
+  let flushed = true;
 
   function updateScoreDisplay() {
     if (!scorer) {
@@ -64,8 +67,21 @@ export function mountSingAlong(container, engine, manifest, mix, verseFilter) {
     perWord.forEach((info, i) => view.markWord(i, "hit", info.matched));
   }
 
+  // Logs the just-finished section's score once it's left (a new section
+  // starts, or the mode unmounts) -- not on every recognized phrase, so a
+  // section only ever contributes one history entry per pass through it.
+  function flushHistory() {
+    if (flushed || !currentKey || !scorer) return;
+    flushed = true;
+    const { total, accuracy } = scorer.getScore();
+    if (total > 0) onAttempt?.(currentKey, "singalong", accuracy);
+  }
+
   view.setOnSectionChange((section, canonical) => {
+    flushHistory();
+    currentKey = section ? sectionKey(section) : null;
     scorer = section ? createScorer(canonical) : null;
+    flushed = false;
     updateScoreDisplay();
   });
 
@@ -131,6 +147,7 @@ export function mountSingAlong(container, engine, manifest, mix, verseFilter) {
   });
 
   return function unmount() {
+    flushHistory();
     view.unmount();
     stopRecognition();
   };

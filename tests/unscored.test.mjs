@@ -155,3 +155,16 @@ test("unmount clears the engine's vocal duck predicate so a later study mode doe
   unmount();
   assert.equal(engine.calls.setVocalDuckPredicate.at(-1), null);
 });
+
+test("logs a 'karaoke' practice-history attempt with null accuracy when a section starts playing", () => {
+  const { section, words } = makeSection({ versesWordCounts: [6] });
+  const manifest = { ...MANIFEST_STUB, sections: [section] };
+  const key = sectionKeyFor(section);
+  const block = makeBlock({ words, sectionKey: key, canonicalWords: words });
+  const engine = makeFakeEngine({ blocks: [block] });
+  const container = document.createElement("div");
+  const attempts = [];
+  mountUnscored(container, engine, manifest, null, () => ({ blankFraction: 0 }), undefined, (...args) => attempts.push(args));
+  engine.emit("blockchange", block);
+  assert.deepEqual(attempts, [[key, "karaoke", null]]);
+});

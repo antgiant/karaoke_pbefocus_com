@@ -1,4 +1,5 @@
 import { buildBookTree, formatDuration, formatVerseRanges } from "./library.js";
+import { formatRelativeDate, lastAccuracy, lastAttempt, recordAttempt } from "./history.js";
 import { churchFitDescription, churchFitEmoji } from "./style-fit.js";
 import { initGate } from "./gate.js";
 import { loadState, saveState, SCHEMA_VERSION } from "./storage.js";
@@ -196,7 +197,19 @@ function renderVersePicker(chapter, selected, verseSelections, onChange) {
   return details;
 }
 
-function renderBookTree(manifest, selected, verseSelections, onChange) {
+/** Compact "last studied" hint for a chapter row -- e.g. "3d ago · 82%" -- or null if this section has no practice history yet. */
+function renderHistoryBadge(practiceHistory, key) {
+  const attempt = lastAttempt(practiceHistory, key);
+  if (!attempt) return null;
+  const badge = document.createElement("span");
+  badge.className = "chapter-history";
+  const accuracy = lastAccuracy(practiceHistory, key);
+  badge.textContent = accuracy !== null ? `${formatRelativeDate(attempt.date)} · ${Math.round(accuracy * 100)}%` : formatRelativeDate(attempt.date);
+  badge.title = accuracy !== null ? `Last practiced ${formatRelativeDate(attempt.date)}, ${Math.round(accuracy * 100)}% accuracy` : `Last practiced ${formatRelativeDate(attempt.date)}`;
+  return badge;
+}
+
+function renderBookTree(manifest, selected, verseSelections, onChange, practiceHistory) {
   const tree = buildBookTree(manifest);
   const container = document.getElementById("bookTree");
   container.innerHTML = "";
@@ -244,6 +257,9 @@ function renderBookTree(manifest, selected, verseSelections, onChange) {
       label.appendChild(checkbox);
       label.appendChild(document.createTextNode(chapter.label));
       item.appendChild(label);
+
+      const historyBadge = renderHistoryBadge(practiceHistory, chapter.key);
+      if (historyBadge) item.appendChild(historyBadge);
 
       const versePicker = renderVersePicker(chapter, selected, verseSelections, onChange);
       if (versePicker) item.appendChild(versePicker);
@@ -353,6 +369,12 @@ function initSelectionUi(manifest, manifestUrl) {
     activePlaylistId = importedRecord.id;
   }
 
+  // Practice history is global (not scoped to `sameLibrary` like the
+  // playlists above) -- a section studied under one manifest keeps its
+  // history even if the Pathfinder later switches libraries, since
+  // sectionKey is manifest-independent (see history.js).
+  let practiceHistory = state.history ?? {};
+
   // Live, in-memory working copies of the active playlist's data -- same
   // shapes (Set/Map/mix-with-a-Map) the app always used for "the
   // selection," just rebuilt from whichever playlist record is active
@@ -395,7 +417,13 @@ function initSelectionUi(manifest, manifestUrl) {
       scoredInput: scoredInputSelect.value,
       duckVocals: duckVocalsCheckbox.checked,
     };
-    saveState({ schemaVersion: SCHEMA_VERSION, manifestUrl, playlists, activePlaylistId });
+    saveState({ schemaVersion: SCHEMA_VERSION, manifestUrl, playlists, activePlaylistId, history: practiceHistory });
+  }
+
+  /** Records one study attempt for `key` and persists it immediately -- passed into each study mode as onAttempt. */
+  function logAttempt(key, mode, accuracy) {
+    practiceHistory = recordAttempt(practiceHistory, key, mode, accuracy);
+    saveState({ schemaVersion: SCHEMA_VERSION, manifestUrl, playlists, activePlaylistId, history: practiceHistory });
   }
 
   const styleSelect = renderStyleOptions(manifest, mix.defaultStyleId);
@@ -417,7 +445,7 @@ function initSelectionUi(manifest, manifestUrl) {
   function rerender() {
     syncMixToSelection(mix, manifest, selected);
     persistActivePlaylist();
-    renderBookTree(manifest, selected, verseSelections, rerender);
+    renderBookTree(manifest, selected, verseSelections, rerender, practiceHistory);
     renderSummary(selected, manifest, verseSelections);
     renderMixEditorIfOpen();
   }
@@ -450,7 +478,7 @@ function initSelectionUi(manifest, manifestUrl) {
     renderMixEditorIfOpen(); // section-level take controls with no override of their own follow this default
   });
 
-  renderBookTree(manifest, selected, verseSelections, rerender);
+  renderBookTree(manifest, selected, verseSelections, rerender, practiceHistory);
   renderSummary(selected, manifest, verseSelections);
 
   // --- Playlist switcher: create / rename / duplicate / delete / select active ---
@@ -477,7 +505,7 @@ function initSelectionUi(manifest, manifestUrl) {
     defaultTakeCheckbox.checked = (mix.defaultTakeRank ?? 0) > 0;
     syncStudyOptionsFromActivePlaylist();
     renderPlaylistSelect();
-    renderBookTree(manifest, selected, verseSelections, rerender);
+    renderBookTree(manifest, selected, verseSelections, rerender, practiceHistory);
     renderSummary(selected, manifest, verseSelections);
     renderMixEditorIfOpen();
     persistActivePlaylist(); // record the new activePlaylistId itself
@@ -520,7 +548,7 @@ function initSelectionUi(manifest, manifestUrl) {
     defaultTakeCheckbox.checked = (mix.defaultTakeRank ?? 0) > 0;
     syncStudyOptionsFromActivePlaylist();
     renderPlaylistSelect();
-    renderBookTree(manifest, selected, verseSelections, rerender);
+    renderBookTree(manifest, selected, verseSelections, rerender, practiceHistory);
     renderSummary(selected, manifest, verseSelections);
     renderMixEditorIfOpen();
     persistActivePlaylist();
@@ -721,14 +749,14 @@ function initSelectionUi(manifest, manifestUrl) {
 
     if (scoredCheckbox.checked && scoredInputSelect.value === "typeahead") {
       playerControls.innerHTML = "";
-      unmountStudyView = mountTypeAhead(karaokeView, program, () => lengthMatchedCheckbox.checked);
+      unmountStudyView = mountTypeAhead(karaokeView, program, () => lengthMatchedCheckbox.checked, logAttempt);
       return;
     }
 
     engine.loadProgram(program);
 
     if (scoredCheckbox.checked) {
-      unmountStudyView = mountSingAlong(karaokeView, engine, manifest, mix, verseFilter);
+      unmountStudyView = mountSingAlong(karaokeView, engine, manifest, mix, verseFilter, logAttempt);
     } else {
       const getUnscoredOptions = () => ({
         blankFraction: Math.min(100, Math.max(0, Number(hintLevelInput.value) || 0)) / 100,
@@ -736,7 +764,7 @@ function initSelectionUi(manifest, manifestUrl) {
         lengthMatched: lengthMatchedCheckbox.checked,
         duckVocals: duckVocalsCheckbox.checked,
       });
-      unmountStudyView = mountUnscored(karaokeView, engine, manifest, mix, getUnscoredOptions, verseFilter);
+      unmountStudyView = mountUnscored(karaokeView, engine, manifest, mix, getUnscoredOptions, verseFilter, logAttempt);
     }
     unmountPlayerControls = mountPlayerControls(playerControls, engine, { styleLabelFor });
     engine.play();

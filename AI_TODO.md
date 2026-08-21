@@ -60,17 +60,33 @@ item is scoped as "go improve this," not "implement design X."
   dropdown in others depending on take count. A Pathfinder using both has
   to learn two different mental models for "which take."
 
-**Open question:** what should "improved" actually look like? Some
-directions worth considering, none decided: giving every take control the
-same interaction pattern regardless of take count (always a dropdown/list,
-never switching shape at exactly 2 takes); letting the Pathfinder preview
-a take's audio before committing to it; showing which take is *currently
-in effect* more prominently when a per-section override is following vs.
-overriding the blanket default; surfacing take count in the main style
-selector's `<option>` text so a Pathfinder knows before drilling into the
-mix editor whether a style even has alternates worth exploring. Resolve
-with the user before implementing rather than guessing at a specific
-design.
+**Decided (confirmed with the user):**
+- **Core redesign: treat each take as its own paintable style**, not a
+  separate take-selector control layered on top of style painting. Since
+  most style/passage combos only ever have two takes, the Pathfinder's
+  mental model should be "paint Take 1 vs Take 2 the same way you paint
+  Country vs Pop" rather than learning a second, parallel UI (today's
+  checkbox-or-dropdown `takeOverrides`) just for take choice. This is a
+  bigger change than it sounds: it folds take selection into the existing
+  style-painting model instead of keeping it as a separate axis
+  (`mix.defaultTakeRank`/`mix.takeOverrides`), so it needs real scoping
+  before implementation -- e.g. the style palette (today one entry per
+  manifest style) would need take-variant entries exposed alongside each
+  style wherever more than one take exists, and `mix.sections`' per-word
+  style-id array (or a replacement of it) would need to encode take
+  alongside style. Whoever picks this up should design the concrete data-
+  model change (probably via a fresh look at `mix.js`'s `createMix`/
+  `paintRange`/`getRuns` and `mix-editor.js`'s style palette rendering)
+  rather than bolting this onto the existing take-rank fields.
+- **Also include**, regardless of how the above lands: an audio preview so
+  a Pathfinder can hear a take before picking it (rather than choosing
+  blind based on an arbitrary ordinal); a clearer visual indicator of which
+  take is currently in effect for a given section/style; and take count
+  surfaced in the main style selector's `<option>` text so a Pathfinder
+  knows before drilling in whether a style has alternates worth exploring.
+- Explicitly **not** pursuing a "keep the current checkbox/dropdown model
+  but make it always a dropdown" fix -- the take-as-style-variant redesign
+  above supersedes that direction.
 
 **Relevant files:** `index.html`'s `#defaultTakeRow`/`#styleSelect`,
 `assets/js/main.js` (the checkbox's wiring, `renderStyleOptions`),
@@ -115,13 +131,13 @@ duck-predicate path Karaoke Mode uses. Since every recording now has stems,
 there's no longer a "what about a recording with no stems" question to
 resolve -- the sliders can just always be available.
 
-**Open questions:**
-- Should the two sliders persist per playlist (like every other Karaoke
-  Mode setting) or be a Sleep-Mode-session-only preference that resets
-  each time?
-- Does a 0% vocal slider need to actually stop fetching/decoding the vocal
-  track (bandwidth/battery -- Sleep Mode is explicitly a leave-it-running-
-  overnight feature), or is muting its `<audio>` element's volume enough?
+**Decided (confirmed with the user):**
+- The two sliders persist per playlist, alongside the rest of Karaoke
+  Mode's settings (`studyOptions`), same as `duckVocals` -- not a
+  session-only preference.
+- A 0% vocal slider just mutes the vocal `<audio>` element's volume; it
+  doesn't stop fetching/decoding the track. Simpler than conditional
+  loading, at the cost of some wasted bandwidth/battery over a full night.
 
 **Relevant files:** `assets/js/sleep-mode.js` (`PLAIN_KARAOKE_OPTIONS`,
 the volume/fade-out wiring), `assets/js/playback-engine.js`
@@ -292,84 +308,87 @@ ends up playlist-scoped instead of mix-scoped).
 
 ---
 
-## 5. [ ] Practice history / progress tracking across sessions
+## 6. [ ] "Name that passage" -- audio-sample reference-recall mode
 
-**Goal:** persist per-section practice results across sessions -- attempts,
-accuracy trend, last-practiced date -- so a Pathfinder can see improvement
-over time instead of a score that vanishes the moment a study session ends.
-
-**Current state (verified against code):**
-- Type-Ahead's accuracy (`type-ahead.js`'s
-  `` scoreEl.textContent = `Score: ${correctFirstTry}/${totalGated} words correct on the first try (${pct}%)` ``)
-  and Sing-Along's accuracy (`sing-along.js`'s `scorer.getScore()`, from
-  `stt-score.js`'s `createScorer`) are both computed purely in memory and
-  written straight into a `<p>` -- neither is ever passed to `storage.js`
-  or persisted anywhere. Reloading the page or leaving the mode loses it.
-- `storage.js` persists exactly `{schemaVersion, manifestUrl, playlists,
-  activePlaylistId}` -- there's no history/stats field in the shape today.
-- `library.js`'s `sectionKey(section)` (`book|chapter|verseStart|verseEnd`)
-  is already a stable, manifest-independent identifier a history record
-  could key off of -- the same key `mix.takeOverrides`/`mix.sections`
-  already use for their own per-section data.
-
-**Open questions:**
-- What gets recorded per attempt -- just a latest/best score, or enough
-  detail (date, mode, accuracy) to show a trend per section over time?
-- Does history live per-playlist (inside a playlist record, like
-  `studyOptions`) or globally across all playlists, since the same section
-  could be studied from more than one playlist? `sectionKey` being
-  manifest/playlist-independent makes a global history the more capable
-  option (it would also feed item 8 below) -- confirm before implementing
-  rather than defaulting to per-playlist out of convenience.
-- Should Karaoke Mode (unscored) log anything, given it has no inherent
-  score today, or does history only cover the two modes that already
-  produce one (Type-Ahead, Sing-Along)?
-
-**Relevant files:** `assets/js/study-modes/type-ahead.js`,
-`assets/js/study-modes/sing-along.js`, `assets/js/study-modes/stt-score.js`
-(the score computations to persist), `assets/js/storage.js` (persisted
-state shape), `assets/js/library.js` (`sectionKey`), `assets/js/
-playlists.js` (if this ends up scoped per-playlist instead of global).
-
----
-
-## 6. [ ] Verse-reference drill mode
-
-**Goal:** add a study mode that drills scripture-reference recall --
-"given this passage text, name the reference" and/or "given this
-reference, recite the passage" -- since PBE competition scoring includes
-reference recall, not just word-for-word text, and no existing mode tests
-this.
+**Goal:** add a study mode that plays a sung sample from a section and
+quizzes the Pathfinder on *which passage that is* (the reference), rather
+than testing the passage's text. Deliberately audio/karaoke-first, not a
+plain-text flashcard -- the user already has other tools for text-based
+reference recall outside this app, so this needs to stay within the
+karaoke/playback theme to earn its place here. PBE competition scoring
+includes reference recall, not just word-for-word text, and no existing
+mode tests this.
 
 **Current state (verified against code):**
 - Every existing study mode (unscored/Karaoke Mode, Type-Ahead,
-  Sing-Along) drills the passage's *words* only. References appear
-  purely as passive display -- `passageLabel(section)` in the heading,
-  `verse-num` superscripts inline per verse (`word-stream.js`) -- and are
-  never the thing being tested.
-- `library.js`'s `passageLabel(section)` (`` `${book} ${chapter}:${verseStart}-${verseEnd}` ``
-  or `` `${book} ${chapter}` ``) already formats a reference string a drill
-  mode could reuse for prompts/answers; `orderedSections`/`findSection`
-  already give the tools to pick and look up sections.
-- The existing study-mode architecture -- each `study-modes/*.js` file
-  exports a `mount*()` returning an `unmount()`, wired up alongside
-  `mountUnscored`/`mountSingAlong`/`mountTypeAhead` from wherever the Study
-  panel's mode picker lives -- is the pattern a new mode would follow.
+  Sing-Along) drills the passage's *words* only. References appear purely
+  as passive display -- `passageLabel(section)` in the heading, `verse-num`
+  superscripts inline per verse (`word-stream.js`) -- never the thing being
+  tested. `library.js`'s `passageLabel(section)` already formats the
+  reference string this mode would quiz against.
+- The dual voice-or-typed input pattern this mode should reuse already
+  exists for Scored mode: `main.js`'s `scoredInputSelect` picks between
+  `"typeahead"` (→ `mountTypeAhead`, typed input) and `"singalong"` (→
+  `mountSingAlong`, Web Speech API mic input via `isSingAlongSupported()`),
+  defaulting to whichever the browser supports (`main.js:691`). It's an
+  either/or selection today, not simultaneous -- this mode should offer
+  the same choice mechanism for submitting a reference guess.
+- Karaoke Mode's existing blank-percent slider (`unscored.js`,
+  `getOptions().blankFraction`) is the precedent for a difficulty control
+  the Pathfinder adjusts per attempt -- this mode's "how much help" control
+  (words shown/hidden, vocals on/off) should follow the same pattern rather
+  than being a fixed on/off setting.
+- Every recording already plays as a synced instrumental+vocal *pair*
+  (`playback-engine.js`'s `makeSource()`), and the engine already supports
+  muting/scaling each track independently (`setVolume`, the duck-predicate
+  machinery) -- an "instrumental-only, no words" hard-mode sample is a
+  direct application of mechanisms that already exist, not new engine
+  capability. (Also ties to item 2's planned instrumental/vocal sliders --
+  worth building on the same underlying per-track volume control rather
+  than a separate one-off for this mode.)
 
-**Open questions:**
-- Text→reference, reference→text, or both directions?
-- Multiple-choice (pick the right reference from a few) vs. free-text entry
-  (like Type-Ahead's typed-word matching)? Free text needs tolerance for
-  reference-format variation ("John 3:16" vs "3:16" vs "John chapter 3
-  verse 16").
-- Does this reuse `createPassageView`'s windowed word display for the
-  passage-text side, or is reference drilling a lighter-weight,
-  non-karaoke UI entirely (more like a flashcard)?
+**Decided (confirmed with the user):**
+- **Primary direction only: sample → guess the reference.** Play an audio
+  sample from a section, Pathfinder identifies which passage it is. The
+  reverse (show the reference, Pathfinder sings/produces the passage
+  karaoke-style) is a stretch-goal/open exploration only, not required --
+  the user isn't sure there's a clean karaoke-style way to do that
+  direction, so don't block this item on solving it.
+- **Answer input:** accepts both voice and typed, matching Scored mode's
+  existing `scoredInputSelect` pattern (`mountTypeAhead`/`mountSingAlong`)
+  -- reuse that choice mechanism rather than inventing a new one.
+- **Sample difficulty is configurable per attempt**, mirroring Karaoke
+  Mode's blank-percent slider: a control lets the Pathfinder choose how
+  much help they get each time -- ranging from full audio with karaoke
+  words shown (easy) down to instrumental-only with no on-screen words
+  (hardest, pure melody-based recognition) -- rather than one fixed
+  difficulty.
+
+**Decided (confirmed with the user):**
+- **Sample:** a short clip from a random point within a randomly-picked
+  section -- not the whole section from its start. Closer to real "name
+  that tune" difficulty, forcing recognition from a snippet rather than
+  the full passage.
+- **Answer strictness:** book + chapter is close enough to count as
+  correct -- an exact verse-range match isn't required. Getting the
+  specific verse boundaries right is treated as less important than
+  knowing roughly where the passage lives.
+
+**Open question (implementation-level, not yet resolved):**
+- What tolerance does the free-text/voice answer matching need for
+  reference-format variation ("John 3:16" vs "3:16" vs spoken-out-loud
+  forms like "John chapter three")? A matching-strictness decision (book +
+  chapter, above) still needs a text-normalization approach to actually
+  compare a Pathfinder's answer against it.
 
 **Relevant files:** `assets/js/study-modes/` (a new file alongside
 `unscored.js`/`type-ahead.js`/`sing-along.js`), `assets/js/library.js`
-(`passageLabel`, `orderedSections`, `findSection`), wherever the Study
-panel's mode picker lives in `index.html`/`main.js`.
+(`passageLabel`, `orderedSections`, `findSection`), `assets/js/
+playback-engine.js` (`makeSource()`, per-track volume -- for the
+instrumental-only hard mode), `assets/js/main.js` (`scoredInputSelect`,
+the pattern to mirror for voice-vs-typed input), `assets/js/
+study-modes/unscored.js` (`blankFraction`, the difficulty-slider pattern
+to mirror).
 
 ---
 
@@ -396,19 +415,26 @@ extension of something partial.
   service worker here can only cache what it observes being fetched at
   runtime, not pre-cache anything at install time.
 
-**Open questions:**
-- Cache the manifest + audio opportunistically (whatever's been fetched
-  during normal use just stays available), or does a Pathfinder need an
-  explicit "download this playlist for offline" action? Audio files are
-  naturally largish (a full passage's worth of stems), so an explicit
-  download step may be better than silently filling up storage.
-- Every recording is now a stem *pair* (instrumental + vocal, see
-  AGENTS.md) -- both need caching together per block, or a partially-cached
-  pair breaks playback.
-- Should the uploaded-local-file manifest path (`gate.js`'s "upload a JSON
-  file" flow, explicitly *not* remembered today) interact with offline
-  support at all, or does offline only make sense for the URL-based/
-  remembered manifest path?
+**Decided (confirmed with the user):**
+- **Both caching modes, not one or the other:** a size-capped opportunistic
+  cache (whatever's played during normal use stays available offline, up
+  to a storage limit) *and* an explicit "download this playlist for
+  offline" action for a deliberate, complete download. Both need their own
+  "clear this cache" action and a way to see how much space each is
+  currently using -- this is real storage-management UI, not just a
+  background service worker.
+- **Remember the manifest across reloads no matter how it was loaded** --
+  URL, pasted, or uploaded-file alike. This changes `gate.js`'s current
+  behavior beyond just this item's scope: today the uploaded-file path is
+  explicitly *not* remembered (`gate.js`'s own comment), and even the
+  URL-based manifest is "always re-fetched, never cached." Making the
+  manifest itself persist/cache is a prerequisite for offline support to
+  work for every load path, not an optional nice-to-have -- implementing
+  this item means revisiting that "always re-fetched" design decision in
+  `gate.js` directly, not just adding a service worker alongside it.
+- Every recording is a stem *pair* (instrumental + vocal, see AGENTS.md) --
+  both need caching together per block in either caching mode, or a
+  partially-cached pair breaks playback.
 
 **Relevant files:** `assets/js/gate.js` (`fetchManifest`, the "always
 re-fetched" comment, `manifestUrl` persistence), `assets/js/
@@ -442,17 +468,17 @@ review.
   Sleep Mode's shuffle toggle -- the same shuffling mechanism would likely
   apply here.
 
-**Open questions:**
-- Draw the review set from "every section across all playlists" (simple,
-  no dependency on item 5), or "every section with a logged practice
-  history" (more targeted, but depends on item 5 shipping first)? Worth
-  sequencing against item 5 rather than deciding in isolation.
-- Which style/mix applies to a section pulled in from outside the
-  currently-active playlist -- that section's own playlist's mix, or the
-  active playlist's default style?
-- Does this reuse one of the existing study modes (Karaoke Mode) against
-  this cross-playlist program, or is it its own mode with its own UI entry
-  point?
+**Decided (confirmed with the user):**
+- **Let the Pathfinder choose the review-set source** rather than
+  hard-coding one -- offer both "every section across all playlists" and
+  "only sections with a logged practice history" (depends on item 5) as
+  options in this mode's own setup UI, not a single fixed behavior.
+- A section pulled in from outside the currently-active playlist uses
+  *that section's own playlist's mix* -- respects whatever genre-mix
+  customization the Pathfinder already did for it, rather than flattening
+  everything to the active playlist's default style.
+- This reuses the existing Karaoke Mode renderer, just pointed at a
+  cross-playlist program -- not a new standalone mode with its own UI.
 
 **Relevant files:** `assets/js/program-builder.js` (`buildProgram`,
 `shuffleBySection`), `assets/js/playlists.js` (playlist record shape --
@@ -479,11 +505,15 @@ or general readability preference.
   rather than the passage) or alongside `studyOptions` if scoped
   per-playlist instead.
 
-**Open questions:**
-- App-wide setting (persisted once, applies everywhere `.karaoke-word`
-  renders, including Sleep Mode) or per-mode (e.g. Sleep Mode wants it
-  bigger than the regular Study panel)?
-- A fixed set of sizes (Small/Medium/Large) or a continuous slider?
+**Decided (confirmed with the user):**
+- **Per-mode, not app-wide** -- each mode (regular Study panel vs. Sleep
+  Mode) gets its own text-size setting, since viewing conditions differ
+  (a phone held close during active study vs. propped up across a dark
+  room overnight). This means a separate persisted value per mode, not one
+  shared app-wide number.
+- **A continuous slider**, not a fixed Small/Medium/Large set -- needs
+  testing across the range to make sure text still fits its container well
+  at both extremes.
 
 **Relevant files:** `assets/css/styles.css` (`.karaoke-word`,
 `.karaoke-line`, `.karaoke-heading`, `.sleep-overlay .karaoke-word` -- the
@@ -509,17 +539,93 @@ mix editor instead of having to manually repaint over it word-by-word.
 - No history/undo-stack concept exists anywhere in `mix.js` or
   `mix-editor.js` today.
 
-**Open questions:**
-- Should undo be scoped to one continuous paint stroke (one undo step per
-  drag/tap), or should it also cover other mix-editor actions (take-rank
-  changes, style-select changes) as one combined history?
-- How many undo steps to retain -- unlimited for the current editing
-  session, or a capped stack?
-- Does undo state need to survive a page reload (persisted in the playlist
-  record), or is it session-only (cleared once the mix editor closes/
-  unmounts)? Session-only is simpler and matches how most in-app undo
-  already behaves, but confirm rather than assuming.
+**Decided (confirmed with the user):**
+- Scoped to paint strokes only -- one undo step per drag/tap paint
+  gesture. Take-rank changes and style-select changes stay outside this
+  history (not combined into one undo model).
+- Unlimited undo steps for the current editing session -- no capped stack,
+  no eviction logic needed.
+- Session-only -- cleared once the mix editor closes/unmounts, not
+  persisted in the playlist record across a reload.
 
 **Relevant files:** `assets/js/mix-editor.js` (the paint gesture handlers),
 `assets/js/mix.js` (`paintRange`, and wherever a snapshot/history array
 would need to hook in).
+
+---
+
+## 11. [ ] Port the "Rogue Sheep" easter egg from pbe-practice-engine
+
+**Goal:** bring over the "Rogue Sheep" whimsical easter egg from the
+sibling `pbe-practice-engine` workspace -- a toggleable, purely-decorative
+wandering sheep sprite that roams the screen -- adapted to this app's
+module structure and UI conventions.
+
+**Current state (verified against `pbe-practice-engine`'s code, a separate
+workspace at `/Users/daddy/Library/CloudStorage/OneDrive-Personal/
+Documents/Code/pbe-practice-engine`, not part of this repo):**
+- It's a single `<label>`/checkbox toggle (`#rogue-sheep` in
+  `index.html:106-109`) sitting near that app's quiz-results UI, wired to
+  `rogueSheepCheckbox`'s `change` listener (`script.js:5993-6000`), which
+  calls `startRogueSheep()`/`stopRogueSheep()` to start/stop a spawn
+  interval.
+- **This is a large, self-contained subsystem, not a small snippet** --
+  confirmed contiguous from `script.js:4096` to `script.js:6001`, roughly
+  1,900 of that file's 6,078 total lines (about a third of the whole
+  file). It's made of `createSheepParticle()` (spawns a small rising
+  emoji/particle effect), `performSheepAction()` (a ~1,400-line `switch`
+  with one case per action name, each animating a different emoji/particle
+  combo above the sheep), `pickRandomAction()` (weighted-random pick from
+  `sheepActions`, ~90 named actions grouped into categories -- weather,
+  sports, holidays, transportation, animal encounters, occupations, etc.,
+  each `weight: 1` except `read` at `weight: 2`), and `createRogueSheep()`
+  itself (`script.js:5646-5958`, ~312 lines) -- the movement/behavior state
+  machine (`purposeful`/`wandering`/`grazing`/`curious`/`trotting`/
+  `performing` states), screen-edge entry/exit, `visualViewport`-aware
+  positioning with iOS-safe-area padding, and movement speed scaled to the
+  screen's diagonal so it looks consistent across device sizes.
+- Visuals: a random 🐑/🐏 emoji, sized 75%-125%, with a 1% chance of being
+  a "black sheep" (`filter: brightness(0.2) saturate(0.5)`, see
+  `styles.css:653-712`'s `.rogue-sheep*` rules and the `sheep-jump`/
+  `sheep-jump-flipped` keyframes). It's `aria-hidden="true"` and
+  `pointer-events: none` -- purely decorative, no interaction with any
+  quiz/study logic in that app, which should make it low-coupling to port.
+- `pbe-practice-engine`'s `script.js` is one large non-module script (no
+  ES imports/exports, unlike this repo). This app (`pbe-playlist`) is
+  organized as focused ES modules under `assets/js/`, with study-mode-like
+  features following a `mount*(container, ...)` → returns `unmount()`
+  convention (see `mountUnscored`/`mountSleepMode`/`mountPlayerControls`
+  etc., all wired from `main.js`). Porting this isn't a drop-in file copy
+  -- it needs restructuring into that convention, most likely a new
+  `assets/js/rogue-sheep.js` exporting something like
+  `mountRogueSheep()`/an `unmount()`/toggle pair.
+
+**Decided (confirmed with the user):**
+- **Placement:** a sheep-emoji button next to the Start Studying and Sleep
+  Mode buttons. It toggles the mode on/off, shows a tooltip on hover
+  ("This toggles Rogue Sheep Mode on or off"), and must clearly visually
+  indicate whether it's currently on or off (not just a plain icon with no
+  state feedback) -- not the footer, not buried in the Study panel's other
+  settings.
+- **Port the full ~90-action library as-is** -- no trimming/curation pass,
+  bring over every action category unchanged.
+- **Toggle state persists across reloads**, stored in `storage.js`'s
+  top-level state -- once turned on, it stays on until explicitly turned
+  off, consistent with how this app's other settings persist.
+
+**Open question (implementation-level, not yet resolved):**
+- Confirm no part of `performSheepAction()`'s ~90 cases depends on
+  `pbe-practice-engine`-specific globals, CSS variables, or DOM elements
+  that don't exist in this app before porting wholesale -- not yet checked
+  in detail given the size of that switch statement.
+
+**Relevant files (source, in the separate `pbe-practice-engine` workspace):**
+`index.html:106-109` (the checkbox), `styles.css:653-712` (`.rogue-sheep*`
+rules, `sheep-jump`/`sheep-jump-flipped` keyframes), `script.js:4096-6001`
+(`createSheepParticle`, `performSheepAction`, `pickRandomAction`,
+`createRogueSheep`, `startRogueSheep`, `stopRogueSheep`).
+**Relevant files (destination, in this repo):** a new
+`assets/js/rogue-sheep.js` following the `mount*()`/`unmount()`
+convention, `assets/js/main.js` (where it'd get wired up), `index.html`
+(new toggle markup), `assets/css/styles.css` (ported `.rogue-sheep*`
+rules).

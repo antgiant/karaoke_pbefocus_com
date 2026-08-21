@@ -27,10 +27,16 @@ test("saveState then loadState round-trips a multi-playlist collection exactly",
       { id: "b", name: "1 John Focus", selectedSectionKeys: [], verseSelections: {}, activeStyle: null, mix: null },
     ],
     activePlaylistId: "b",
+    history: { "Mark|1|null|null": [{ date: "2026-01-01T00:00:00.000Z", mode: "karaoke", accuracy: null }] },
   };
   saveState(saved);
   const loaded = loadState();
   assert.deepEqual(loaded, saved);
+});
+
+test("loadState defaults history to an empty object when nothing's been saved yet", () => {
+  const state = loadState();
+  assert.deepEqual(state.history, {});
 });
 
 test("loadState falls back to a fresh default playlist for pre-schemaVersion-2 (or otherwise malformed) saved state, without throwing", () => {

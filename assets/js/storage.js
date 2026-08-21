@@ -15,6 +15,10 @@ function defaultState() {
     manifestUrl: null,
     playlists: [createPlaylistRecord("My Playlist")],
     activePlaylistId: null, // resolved to playlists[0].id below once the array exists
+    // sectionKey -> Attempt[] (see history.js) -- global across playlists,
+    // not per-playlist, since the same section can be studied from more
+    // than one playlist and should share one history (AI_TODO.md item 5).
+    history: {},
   };
 }
 

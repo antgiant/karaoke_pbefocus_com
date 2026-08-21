@@ -35,7 +35,7 @@ const RAMP_STEP_PER_REPEAT = 0.2;
  * toward silence, not just its on-screen text -- true "guess the words"
  * recall. See playback-engine.js's setVocalDuckPredicate.
  */
-export function mountUnscored(container, engine, manifest, mix, getOptions, verseFilter) {
+export function mountUnscored(container, engine, manifest, mix, getOptions, verseFilter, onAttempt) {
   const view = createPassageView(container, engine, manifest, mix, verseFilter);
   const playCounts = new Map();
   let revealed = new Set();
@@ -68,6 +68,12 @@ export function mountUnscored(container, engine, manifest, mix, getOptions, vers
       hinted = new Set();
       return;
     }
+    // Karaoke Mode has no inherent score, so it just logs "studied on this
+    // date" -- once per section-start rather than waiting on a completion
+    // signal this mode doesn't have (see AI_TODO.md item 5). A repeat play
+    // of the same section (rampOnRepeat) logs again, same as any other
+    // fresh attempt.
+    onAttempt?.(sectionKey(section), "karaoke", null);
     const { blankFraction = 0, rampOnRepeat } = getOptions();
     let effectiveBlank = blankFraction;
     if (rampOnRepeat) {

@@ -350,6 +350,14 @@ details.panel:not([open]) h2 {
   background: rgba(15, 99, 112, 0.08);
 }
 
+.chapter-history {
+  display: inline-block;
+  margin: -0.15rem 0 0.15rem 2.55rem; /* aligns under the label text, past the checkbox */
+  font-size: 0.78rem;
+  color: var(--teal-dark);
+  opacity: 0.65;
+}
+
 .btn.tiny {
   padding: 0.3rem 0.6rem;
   font-size: 0.85rem;
