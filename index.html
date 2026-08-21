@@ -46,6 +46,9 @@
           <input id="gateUrlInput" type="url" name="library" placeholder="https://…/library.json" required />
           <button id="gateSubmitBtn" type="submit" class="btn">Unlock Library</button>
         </form>
+        <p class="gate-divider">or</p>
+        <button id="gateUploadBtn" type="button" class="btn secondary">Upload Manifest File…</button>
+        <input id="gateUploadFile" type="file" accept="application/json" hidden />
         <p id="gateError" class="gate-error" role="alert" hidden></p>
         <p id="gateStatus" class="gate-status" role="status" aria-live="polite" hidden></p>
       </section>

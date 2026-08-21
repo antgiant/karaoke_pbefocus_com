@@ -11,12 +11,18 @@ any local static server, matching the other `pbefocus.com` family tools.
 ## The Library Isn't Public Yet
 
 This app ships with **no song content at all**. Everything -- audio, lyrics,
-word timing -- lives behind a private library manifest URL you supply,
-either as `?library=<url>` in the address bar or pasted into the form on
-first load. The manifest URL is remembered in `localStorage` for later
-visits, but always re-fetched (never cached), so pulling the manifest down
-revokes access. See `AGENTS.md` and `scripts/build_manifest.py` for how
-that manifest gets built from the private song library -- that pipeline and
+word timing -- lives behind a private library manifest you supply on first
+load, either a URL (as `?library=<url>` in the address bar, pasted into the
+gate form, or picked up from a prior visit) or a local manifest file via the
+gate's "Upload Manifest File…" button (`assets/js/gate.js`'s
+`readManifestFile`) -- handy for testing against a manifest you haven't
+hosted anywhere yet, or for a Pathfinder who was handed the file directly.
+A URL-loaded manifest is remembered in `localStorage` for later visits, but
+always re-fetched (never cached), so pulling the manifest down revokes
+access; an uploaded manifest isn't remembered at all (there's nothing
+stable to re-fetch it from), so it needs re-uploading each visit. See
+`AGENTS.md` and `scripts/build_manifest.py` for how that manifest gets
+built from the private song library -- that pipeline and
 its output never belong in this public repo (see `.gitignore`).
 
 ## Current Features

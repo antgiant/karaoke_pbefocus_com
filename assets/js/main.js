@@ -337,7 +337,12 @@ function renderFallbackNote(manifest, fallbacks) {
 
 function initSelectionUi(manifest, manifestUrl) {
   const state = loadState();
-  const sameLibrary = state.manifestUrl === manifestUrl;
+  // manifestUrl is null for a manifest loaded via the gate's upload button
+  // (see gate.js's initGate) rather than a URL -- an uploaded file has no
+  // stable identity to compare across visits, so it never counts as "the
+  // same library" as a remembered one, even if the remembered manifestUrl
+  // also happens to be null (e.g. two different uploads in a row).
+  const sameLibrary = manifestUrl !== null && state.manifestUrl === manifestUrl;
   const playlists = sameLibrary && state.playlists.length ? state.playlists : [createPlaylistRecord("My Playlist")];
   let activePlaylistId =
     sameLibrary && findPlaylist(playlists, state.activePlaylistId) ? state.activePlaylistId : playlists[0].id;
@@ -568,6 +573,13 @@ function initSelectionUi(manifest, manifestUrl) {
   document.getElementById("sharePlaylistBtn").addEventListener("click", () => {
     shareDialogPlaylistName.textContent = findPlaylist(playlists, activePlaylistId).name;
     shareIncludeLibraryCheckbox.checked = false;
+    // A library loaded via the gate's upload button (see gate.js) has no
+    // URL to bundle into a share link -- disable rather than leave a
+    // checkbox that would silently do nothing when checked.
+    shareIncludeLibraryCheckbox.disabled = !manifestUrl;
+    shareIncludeLibraryCheckbox.title = manifestUrl
+      ? ""
+      : "This library was loaded from an uploaded file, not a link, so there's no library link to include.";
     updateShareDialog();
     shareDialog.showModal();
   });
