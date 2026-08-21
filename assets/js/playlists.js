@@ -50,6 +50,15 @@ export function createPlaylistRecord(name) {
     activeStyle: null,
     mix: null,
     studyOptions: defaultStudyOptions(),
+    // Karaoke Controls (AI_TODO.md item 4) middle/song tiers -- see
+    // karaoke-controls.js's resolveKaraokeControls. Both start empty
+    // (nothing overridden, everything follows the app-wide default):
+    // karaokeControlsOverride is a *partial* settings object (only the
+    // fields this playlist has explicitly customized); Section Overrides is
+    // a plain object keyed by sectionKey, each value itself a partial
+    // settings object for that one section ("song").
+    karaokeControlsOverride: {},
+    karaokeControlsSectionOverrides: {},
   };
 }
 

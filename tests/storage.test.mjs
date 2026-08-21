@@ -28,6 +28,7 @@ test("saveState then loadState round-trips a multi-playlist collection exactly",
     ],
     activePlaylistId: "b",
     history: { "Mark|1|null|null": [{ date: "2026-01-01T00:00:00.000Z", mode: "karaoke", accuracy: null }] },
+    karaokeControls: { pitchSemitones: 2, rate: 1.1, keyLock: true, countInSeconds: 0, reverbAmount: 0.2 },
   };
   saveState(saved);
   const loaded = loadState();

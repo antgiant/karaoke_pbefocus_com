@@ -1,5 +1,6 @@
 import { STORAGE_KEY } from "./constants.js";
 import { createPlaylistRecord } from "./playlists.js";
+import { defaultKaraokeControls } from "./karaoke-controls.js";
 
 // schemaVersion 2: a named, listable collection of playlists instead of one
 // implicit selection (see AI_TODO.md item 5). Pre-release -- no migration
@@ -19,6 +20,10 @@ function defaultState() {
     // not per-playlist, since the same section can be studied from more
     // than one playlist and should share one history (AI_TODO.md item 5).
     history: {},
+    // Karaoke Controls (AI_TODO.md item 4) app-wide default -- the top tier
+    // of resolveKaraokeControls' three-tier fallback, shared across every
+    // playlist unless a playlist/section override supersedes it.
+    karaokeControls: defaultKaraokeControls(),
   };
 }
 

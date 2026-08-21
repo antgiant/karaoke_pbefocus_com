@@ -97,6 +97,11 @@ export function serializePlaylistForShare(record, { includeManifestUrl = false, 
     // scored/scoredInput) -- no style ids inside, so no dictionary
     // re-keying needed, just pass through as-is.
     studyOptions: record.studyOptions ?? null,
+    // Karaoke Controls (AI_TODO.md item 4) playlist/section overrides --
+    // same reasoning as studyOptions: plain numbers/booleans, no style ids,
+    // no dictionary involvement, passed through as-is.
+    karaokeControlsOverride: record.karaokeControlsOverride ?? null,
+    karaokeControlsSectionOverrides: record.karaokeControlsSectionOverrides ?? null,
   };
   if (includeManifestUrl && manifestUrl) payload.manifestUrl = manifestUrl;
   return payload;
@@ -134,6 +139,12 @@ export function deserializePlaylistFromShare(payload) {
     // falls back to defaultStudyOptions() itself rather than this module
     // reaching into playlists.js for that default.
     studyOptions: payload.studyOptions && typeof payload.studyOptions === "object" ? payload.studyOptions : null,
+    karaokeControlsOverride:
+      payload.karaokeControlsOverride && typeof payload.karaokeControlsOverride === "object" ? payload.karaokeControlsOverride : null,
+    karaokeControlsSectionOverrides:
+      payload.karaokeControlsSectionOverrides && typeof payload.karaokeControlsSectionOverrides === "object"
+        ? payload.karaokeControlsSectionOverrides
+        : null,
   };
 }
 

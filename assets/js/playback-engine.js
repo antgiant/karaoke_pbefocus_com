@@ -23,6 +23,39 @@ const GENRE_CROSSFADE_SECONDS = 1.5; // the style actually changes between block
 const DUCK_TIME_CONSTANT_SECONDS = 0.12; // how quickly the vocal track fades toward its target when a word's blanked state changes -- fast enough to feel word-synced, slow enough not to click
 const STEM_RESYNC_DRIFT_SECONDS = 0.15; // if the vocal/instrumental pair drift apart by more than this, snap them back together
 
+// AI_TODO.md item 4 (Karaoke Controls): neutral settings applied whenever no
+// resolver is registered (setKaraokeControlsResolver, mirroring
+// setVocalDuckPredicate's opt-in shape) -- every existing caller that
+// predates this feature keeps behaving exactly as before.
+const NEUTRAL_CONTROLS = { pitchSemitones: 0, rate: 1, keyLock: true, countInSeconds: 0, reverbAmount: 0 };
+
+// Shared echo/reverb send tuning -- a simple feedback delay line, not a
+// convolution reverb (which would need a synthesized or shipped impulse
+// response file). One shared network per AudioContext, not per source pair
+// -- both slots' wet sends feed the same "room" so an in-flight crossfade
+// blends into one tail rather than two independent ones fighting.
+const REVERB_DELAY_SECONDS = 0.18;
+const REVERB_FEEDBACK = 0.35;
+
+/** Equal-temperament frequency ratio for a pitch shift of `semitones` -- duplicated from karaoke-controls.js deliberately (see that file) so this module has no dependency on the settings-model layer, matching its existing settings-model-agnostic design (c.f. setVocalDuckPredicate). */
+function semitonesToRatio(semitones) {
+  return Math.pow(2, semitones / 12);
+}
+
+/** Builds the shared reverb/echo send network for one AudioContext: a delay line with feedback for a repeating tail, plus an input gain every source's wet send connects into and an output already wired to destination. */
+function createReverbNetwork(audioContext) {
+  const input = audioContext.createGain();
+  const delay = audioContext.createDelay(1);
+  delay.delayTime.value = REVERB_DELAY_SECONDS;
+  const feedback = audioContext.createGain();
+  feedback.gain.value = REVERB_FEEDBACK;
+  input.connect(delay);
+  delay.connect(feedback);
+  feedback.connect(delay);
+  delay.connect(audioContext.destination);
+  return input;
+}
+
 /** Binary search: index of the last word whose start <= t, or -1 before the first word. */
 export function wordIndexAtTime(words, t) {
   let lo = 0;
@@ -133,12 +166,69 @@ export function seekReliably(el, time) {
   });
 }
 
+/**
+ * Wires one <audio> element into `audioContext`'s graph for true pitch
+ * shift (AI_TODO.md item 4): source -> pitch-shift AudioWorkletNode ->
+ * [dry: destination] + [wet: reverbInput, the shared echo/reverb send].
+ * `el.volume` keeps doing everything it always did (envelope/duck/track
+ * volume, see makeSource below) -- createMediaElementSource does NOT bypass
+ * an element's own .volume, it's still applied to what the graph receives,
+ * so none of that existing logic needed to change.
+ *
+ * The pitch-shift node can't be created until pitch-shift-processor.js's
+ * AudioWorkletProcessor has finished loading (audioWorklet.addModule is
+ * async, done once for the whole engine -- see createPlaybackEngine). Until
+ * then this connects the element straight to destination/the reverb send
+ * (pitch shift is simply inert -- effectively pitchSemitones=0 -- for
+ * whatever's already playing when the app first loads) and rewires itself
+ * once the module resolves. Returns null (every method below becomes a
+ * no-op) if the browser has no Web Audio support at all -- pitch
+ * shift/reverb just don't do anything rather than breaking playback.
+ */
+function wireIntoAudioGraph(el, audioContext, workletReady, reverbInput) {
+  if (!audioContext) return null;
+  const sourceNode = audioContext.createMediaElementSource(el);
+  const wetGain = audioContext.createGain();
+  wetGain.gain.value = 0;
+  wetGain.connect(reverbInput);
+  let pitchNode = null;
+  let pendingPitchFactor = 1; // set(...) before the worklet's ready -- applied the instant it is, see below
+  sourceNode.connect(audioContext.destination);
+  sourceNode.connect(wetGain);
+
+  workletReady.then(() => {
+    pitchNode = new AudioWorkletNode(audioContext, "pitch-shift-processor", {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      outputChannelCount: [2],
+    });
+    sourceNode.disconnect(audioContext.destination);
+    sourceNode.disconnect(wetGain);
+    sourceNode.connect(pitchNode);
+    pitchNode.connect(audioContext.destination);
+    pitchNode.connect(wetGain);
+    if (pendingPitchFactor !== 1) pitchNode.port.postMessage({ pitchFactor: pendingPitchFactor });
+  });
+
+  return {
+    setPitchFactor(ratio) {
+      pendingPitchFactor = ratio;
+      pitchNode?.port.postMessage({ pitchFactor: ratio });
+    },
+    setReverbAmount(amount) {
+      wetGain.gain.value = amount;
+    },
+  };
+}
+
 /** A synced instrumental+vocal pair -- every block plays through one of these (see the file-top comment). Normally both elements play at the same volume (envelopeVolume); a caller that's set a duck predicate additionally scales the vocal element by duckFactor, faded toward its target over DUCK_TIME_CONSTANT_SECONDS. Timing (word-level ducking) is driven by the block's own recording.words, since both stems share the original recording's word timing. */
-function makeSource() {
+function makeSource(audioContext, workletReady, reverbInput) {
   const instrumentalEl = new Audio();
   const vocalEl = new Audio();
   instrumentalEl.preload = "auto";
   vocalEl.preload = "auto";
+  instrumentalEl.crossOrigin = "anonymous"; // required for createMediaElementSource to read cross-origin audio into the Web Audio graph at all -- silently produces silence (not an error) without this if the host doesn't send CORS headers
+  vocalEl.crossOrigin = "anonymous";
   let envelopeVolume = 0;
   let duckFactor = 1; // 1 = vocal at full volume, 0 = fully faded out
   let duckTarget = 1;
@@ -155,6 +245,9 @@ function makeSource() {
     instrumentalEl.volume = envelopeVolume * instrumentalTrackVolume;
     vocalEl.volume = envelopeVolume * duckFactor * vocalTrackVolume;
   }
+
+  const instrumentalGraph = wireIntoAudioGraph(instrumentalEl, audioContext, workletReady, reverbInput);
+  const vocalGraph = wireIntoAudioGraph(vocalEl, audioContext, workletReady, reverbInput);
 
   return {
     get src() {
@@ -222,13 +315,56 @@ function makeSource() {
       if (vocal !== undefined) vocalTrackVolume = vocal;
       applyVolumes();
     },
+    /**
+     * AI_TODO.md item 4: `rate` is native HTMLMediaElement.playbackRate
+     * (tempo). `keyLock` (DJ-software convention) sets preservesPitch --
+     * true holds pitch fixed as rate changes, false lets pitch follow rate
+     * naturally (vinyl-style). `pitchSemitones` is an *additional*,
+     * independent shift applied by the Web Audio pitch-shift node on top of
+     * whichever of the above is in effect -- true "key change" without
+     * touching tempo, the thing neither playbackRate nor preservesPitch can
+     * do alone (see AI_TODO.md's "Pitch scope" decision).
+     */
+    setPitchAndRate({ pitchSemitones, rate, keyLock }) {
+      for (const el of [instrumentalEl, vocalEl]) {
+        el.playbackRate = rate;
+        el.preservesPitch = keyLock;
+        el.mozPreservesPitch = keyLock; // legacy Firefox
+        el.webkitPreservesPitch = keyLock; // legacy Safari/WebKit
+      }
+      const ratio = semitonesToRatio(pitchSemitones);
+      instrumentalGraph?.setPitchFactor(ratio);
+      vocalGraph?.setPitchFactor(ratio);
+    },
+    setReverbAmount(amount) {
+      instrumentalGraph?.setReverbAmount(amount);
+      vocalGraph?.setReverbAmount(amount);
+    },
   };
 }
 
 export function createPlaybackEngine() {
+  // One AudioContext (and its pitch-shift AudioWorklet module + shared
+  // reverb send) for the whole engine, both slots' sources routed through
+  // it -- see wireIntoAudioGraph/createReverbNetwork. Constructed
+  // defensively: a browser with no Web Audio support at all just gets inert
+  // pitch-shift/reverb (see wireIntoAudioGraph's null-audioContext path)
+  // rather than broken playback.
+  let audioContext = null;
+  try {
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (AudioContextCtor) audioContext = new AudioContextCtor();
+  } catch {
+    audioContext = null;
+  }
+  const workletReady = audioContext
+    ? audioContext.audioWorklet.addModule(new URL("./audio/pitch-shift-processor.js", import.meta.url)).catch(() => {})
+    : Promise.resolve();
+  const reverbInput = audioContext ? createReverbNetwork(audioContext) : null;
+
   // Two slots (today's "active"/"standby" elements), each a synced
   // instrumental+vocal pair -- see makeSource().
-  const slots = [makeSource(), makeSource()];
+  const slots = [makeSource(audioContext, workletReady, reverbInput), makeSource(audioContext, workletReady, reverbInput)];
 
   let activeIdx = 0;
   let program = { blocks: [] };
@@ -240,6 +376,31 @@ export function createPlaybackEngine() {
   let lastFrameTime = null;
   let masterVolume = 1; // external multiplier (e.g. sleep mode's fade-out), on top of crossfade's own volume math
   let duckPredicate = null; // (canonicalWordIndex) => boolean, or null -- see setVocalDuckPredicate
+
+  // AI_TODO.md item 4 (Karaoke Controls) -- caller-supplied, mirroring
+  // setVocalDuckPredicate's opt-in shape: resolves a block's section to its
+  // effective (already three-tier-resolved) pitch/rate/keyLock/countIn/
+  // reverb settings. Defaults to NEUTRAL_CONTROLS so an engine nobody's
+  // wired this up for behaves exactly as it did before this feature existed.
+  let controlsResolver = () => NEUTRAL_CONTROLS;
+  // A/B loop / section repeat -- deliberately session-only engine state, not
+  // part of the persisted settings model (see karaoke-controls.js's doc
+  // comment). null = no loop active.
+  let loopRange = null; // {startBlockIndex, startTime, endBlockIndex, endTime} | null
+  let loopSeeking = false; // guards against re-triggering the restart every frame while the seek/skip back to the loop start is still in flight
+  // Count-in (AI_TODO.md item 4): while set, updateDucking forces the
+  // active block's vocal silent (reusing the existing duck-fade machinery,
+  // so it fades in smoothly rather than clicking on) until playback reaches
+  // countInEndTime -- see playFromBlock.
+  let countInBlock = null;
+  let countInEndTime = null;
+
+  function applyControlsToSource(source, sectionKey) {
+    const resolved = controlsResolver(sectionKey) ?? NEUTRAL_CONTROLS;
+    source.setPitchAndRate(resolved);
+    source.setReverbAmount(resolved.reverbAmount);
+    return resolved;
+  }
 
   const listeners = { blockchange: [], timeupdate: [], ended: [], playstate: [] };
   function emit(event, ...args) {
@@ -257,6 +418,7 @@ export function createPlaybackEngine() {
     source.setUrls(next.instrumentalUrl, next.vocalUrl);
     source.setVolume(0);
     source.load();
+    applyControlsToSource(source, next.sectionKey);
   }
 
   function cancelLoop() {
@@ -298,9 +460,10 @@ export function createPlaybackEngine() {
     emit("playstate", false);
   }
 
-  /** Moves `source`'s vocal element's volume toward 0 (blanked) or 1 (audible) based on which word `t` currently falls in and the duck predicate. */
+  /** Moves `source`'s vocal element's volume toward 0 (blanked) or 1 (audible) based on which word `t` currently falls in and the duck predicate -- or, while `block` is mid-count-in, forced silent regardless of the predicate (see countInBlock/countInEndTime). */
   function updateDucking(source, block, t, dtSeconds) {
-    source.setDuckTarget(duckTargetFor(block, t, duckPredicate));
+    const target = block === countInBlock && t < countInEndTime ? 0 : duckTargetFor(block, t, duckPredicate);
+    source.setDuckTarget(target);
     source.stepDuck(dtSeconds);
     source.resyncIfDrifted();
   }
@@ -315,6 +478,31 @@ export function createPlaybackEngine() {
     const t = source.currentTime;
     emit("timeupdate", t, block, blockIndex);
     updateDucking(source, block, t, dtSeconds);
+
+    // A/B loop: jump back to the loop's start the instant playback reaches
+    // its end, before any of the normal crossfade/atEnd handling below gets
+    // a chance to run against a `t` that's sitting right at (or past) the
+    // loop's end point -- guarded by loopSeeking so this only fires once
+    // per lap, and skips the normal branch entirely while the restart
+    // (an async seek/skip) is still in flight, so a stale, still-past-due
+    // `t` can't also trigger a spurious crossfade/finish on the same tick.
+    if (loopRange && !loopSeeking && blockIndex === loopRange.endBlockIndex && t >= loopRange.endTime) {
+      loopSeeking = true;
+      const resume = () => {
+        loopSeeking = false;
+      };
+      if (loopRange.startBlockIndex === blockIndex) {
+        source.seekAndPlay(loopRange.startTime).then(resume);
+        rafHandle = requestAnimationFrame(tick); // same-block seek doesn't touch rafHandle itself, unlike playFromBlock below
+      } else {
+        playFromBlock(loopRange.startBlockIndex, loopRange.startTime).then(resume); // manages rafHandle itself
+      }
+      return;
+    }
+    if (loopSeeking) {
+      rafHandle = requestAnimationFrame(tick);
+      return;
+    }
 
     const timeLeft = block.outTime - t;
     const atEnd = timeLeft <= 0 || source.ended;
@@ -344,11 +532,10 @@ export function createPlaybackEngine() {
     rafHandle = requestAnimationFrame(tick);
   }
 
-  async function playFromBlock(index, seekTime) {
+  async function playFromBlock(index, seekTime, { applyCountIn = false } = {}) {
     if (index < 0 || index >= program.blocks.length) return;
     cancelLoop();
     const block = program.blocks[index];
-    const time = seekTime ?? block.inTime;
 
     // If the standby slot already has this exact block loading/loaded (from
     // a prior preloadNext()), swap to it instead of starting a second,
@@ -367,6 +554,38 @@ export function createPlaybackEngine() {
       for (const slot of slots) slot.pause();
       source = activeSource();
       source.setUrls(block.instrumentalUrl, block.vocalUrl);
+    }
+
+    // Applied to whichever source will actually play `block` -- must run
+    // after the standby-swap above settles which slot that is, not before,
+    // or a swap would leave settings on the slot that's about to become
+    // standby instead of the one about to play.
+    const resolved = applyControlsToSource(source, block.sectionKey);
+    const time = seekTime ?? block.inTime;
+    // Count-in (AI_TODO.md item 4): only for a genuinely fresh start
+    // (applyCountIn, set solely by play() when blockIndex was -1) -- never
+    // for a manual skip/seek or an A/B loop restart, which would otherwise
+    // insert an unwanted instrumental-only stretch every single lap.
+    //
+    // NOT implemented as "start earlier and seek into pre-roll audio" --
+    // every real recording checked (scripts/build_manifest.py's output)
+    // has its first word's timestamp at or extremely near 0, meaning the
+    // stem files are trimmed tight to content with no instrumental lead-in
+    // to seek into; seeking to a negative/nonexistent time is simply a
+    // no-op, silently defeating the feature (caught by testing this against
+    // real recordings, not assumed). Instead, playback starts at the
+    // block's normal inTime as always, and the vocal is held silent for the
+    // block's own first countInSeconds -- reusing the existing duck-fade
+    // machinery below -- so the Pathfinder still hears instrumental-only
+    // for a few seconds before the vocal joins, just without inventing time
+    // that doesn't exist in the source audio.
+    const countIn = applyCountIn ? resolved.countInSeconds : 0;
+    if (countIn > 0) {
+      countInBlock = block;
+      countInEndTime = block.inTime + countIn;
+    } else {
+      countInBlock = null;
+      countInEndTime = null;
     }
 
     blockIndex = index;
@@ -395,6 +614,13 @@ export function createPlaybackEngine() {
       blockIndex = -1;
       crossfading = false;
       isPlaying = false;
+      // A loop range is block-index/time pairs scoped to whatever program
+      // was loaded when it was set -- those indices/times could coincidentally
+      // still fall within a *different* program's bounds and trigger a
+      // spurious restart there, so a fresh program always starts loop-free
+      // rather than carrying one over silently.
+      loopRange = null;
+      loopSeeking = false;
     },
 
     /**
@@ -411,9 +637,28 @@ export function createPlaybackEngine() {
       duckPredicate = predicate ?? null;
     },
 
+    /**
+     * AI_TODO.md item 4: `resolver(sectionKey)` must return a complete
+     * {pitchSemitones, rate, keyLock, countInSeconds, reverbAmount} object
+     * (the caller's already-resolved three-tier settings, see
+     * karaoke-controls.js's resolveKaraokeControls) -- called whenever a
+     * block is about to become active or gets preloaded into standby.
+     * Pass null/omit to go back to NEUTRAL_CONTROLS for every block.
+     */
+    setKaraokeControlsResolver(resolver) {
+      controlsResolver = resolver ?? (() => NEUTRAL_CONTROLS);
+    },
+
+    /** A/B loop (AI_TODO.md item 4) -- see the loopRange/loopSeeking doc comments in tick(). Pass null to clear an active loop. */
+    setLoopRange(range) {
+      loopRange = range ?? null;
+      loopSeeking = false;
+    },
+
     play() {
+      audioContext?.resume().catch(() => {}); // must be called from inside a user-gesture handler to satisfy autoplay policy -- play() always is
       if (blockIndex === -1) {
-        playFromBlock(0);
+        playFromBlock(0, undefined, { applyCountIn: true });
         return;
       }
       isPlaying = true;

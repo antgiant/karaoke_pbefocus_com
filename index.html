@@ -164,6 +164,65 @@
           <div id="karaokeView"></div>
           <div id="playerControls"></div>
         </section>
+
+        <details class="panel" id="karaokeControlsPanel">
+          <summary class="panel-summary"><h2>Karaoke Controls</h2></summary>
+
+          <div class="style-select-row">
+            <label for="controlsScopeSelect">Apply changes to</label>
+            <select id="controlsScopeSelect">
+              <option value="app">App-wide default</option>
+              <option value="playlist">This playlist only</option>
+              <option value="song">This song only</option>
+            </select>
+            <select id="controlsScopeSongSelect" hidden aria-label="Which song this applies to"></select>
+            <button id="clearControlsOverrideBtn" type="button" class="btn secondary" hidden>Clear Override</button>
+          </div>
+
+          <div class="hint-slider-row">
+            <span class="hint-slider-endlabel">-12</span>
+            <input type="range" id="pitchSlider" min="-12" max="12" step="1" value="0" aria-label="Pitch shift, in semitones" />
+            <span class="hint-slider-endlabel">+12</span>
+            <span id="pitchValueLabel" class="control-value-label">Normal</span>
+          </div>
+
+          <div class="hint-slider-row">
+            <span class="hint-slider-endlabel">Slower</span>
+            <input type="range" id="rateSlider" min="0.5" max="1.5" step="0.05" value="1" aria-label="Playback speed" />
+            <span class="hint-slider-endlabel">Faster</span>
+            <span id="rateValueLabel" class="control-value-label">100%</span>
+          </div>
+
+          <label class="inline-checkbox">
+            <input type="checkbox" id="keyLockCheckbox" checked />
+            Key Lock (keep pitch steady when speed changes)
+          </label>
+
+          <div class="hint-slider-row">
+            <span class="hint-slider-endlabel">Off</span>
+            <input type="range" id="countInSlider" min="0" max="8" step="1" value="0" aria-label="Count-in, in seconds" />
+            <span class="hint-slider-endlabel">8s</span>
+            <span id="countInValueLabel" class="control-value-label">Off</span>
+          </div>
+
+          <div class="hint-slider-row">
+            <span class="hint-slider-endlabel">Dry</span>
+            <input type="range" id="reverbSlider" min="0" max="1" step="0.05" value="0" aria-label="Reverb/echo amount" />
+            <span class="hint-slider-endlabel">Wet</span>
+            <span id="reverbValueLabel" class="control-value-label">Off</span>
+          </div>
+
+          <h3 class="karaoke-mode-heading">A/B Loop</h3>
+          <p class="ab-loop-hint">
+            Once something's playing, drag across words below to loop just that range for drilling -- or use the shortcut
+            to loop the whole block currently playing.
+          </p>
+          <div class="style-select-row">
+            <button id="loopThisBlockBtn" type="button" class="btn secondary" disabled>Loop Current Block</button>
+            <button id="clearLoopBtn" type="button" class="btn secondary" disabled>Clear Loop</button>
+          </div>
+          <div id="abLoopPicker"></div>
+        </details>
       </div>
     </main>
 

@@ -1,4 +1,4 @@
-import { buildBookTree, formatDuration, formatVerseRanges, maxTakeCountForStyle } from "./library.js";
+import { buildBookTree, findSection, formatDuration, formatVerseRanges, maxTakeCountForStyle, passageLabel } from "./library.js";
 import { formatRelativeDate, lastAccuracy, lastAttempt, recordAttempt } from "./history.js";
 import { churchFitDescription, churchFitEmoji } from "./style-fit.js";
 import { initGate } from "./gate.js";
@@ -34,6 +34,8 @@ import { mountTypeAhead } from "./study-modes/type-ahead.js";
 import { mountSingAlong, isSingAlongSupported } from "./study-modes/sing-along.js";
 import { mountSleepMode } from "./sleep-mode.js";
 import { mountPlayerControls } from "./player-controls.js";
+import { clampKaraokeControls, resolveKaraokeControls } from "./karaoke-controls.js";
+import { mountAbLoopPicker } from "./karaoke-controls-panel.js";
 
 /** A shared-playlist payload -> a fresh playlist record (no id assigned by the payload; the importer always gets a new one, same as any other new playlist). */
 function recordFromSharedPayload(payload) {
@@ -44,6 +46,8 @@ function recordFromSharedPayload(payload) {
   record.activeStyle = shared.activeStyle;
   record.mix = shared.mix;
   if (shared.studyOptions) record.studyOptions = shared.studyOptions;
+  if (shared.karaokeControlsOverride) record.karaokeControlsOverride = shared.karaokeControlsOverride;
+  if (shared.karaokeControlsSectionOverrides) record.karaokeControlsSectionOverrides = shared.karaokeControlsSectionOverrides;
   return record;
 }
 
@@ -381,6 +385,16 @@ function initSelectionUi(manifest, manifestUrl) {
   // sectionKey is manifest-independent (see history.js).
   let practiceHistory = state.history ?? {};
 
+  // Karaoke Controls (AI_TODO.md item 4) app-wide default -- also global,
+  // not scoped to `sameLibrary`, same reasoning as practiceHistory: a
+  // Pathfinder's preferred pitch/speed/etc. isn't tied to which library
+  // they're browsing.
+  let appKaraokeControls = state.karaokeControls;
+
+  function persistFullState() {
+    saveState({ schemaVersion: SCHEMA_VERSION, manifestUrl, playlists, activePlaylistId, history: practiceHistory, karaokeControls: appKaraokeControls });
+  }
+
   // Live, in-memory working copies of the active playlist's data -- same
   // shapes (Set/Map/mix-with-a-Map) the app always used for "the
   // selection," just rebuilt from whichever playlist record is active
@@ -423,13 +437,13 @@ function initSelectionUi(manifest, manifestUrl) {
       scoredInput: scoredInputSelect.value,
       duckVocals: duckVocalsCheckbox.checked,
     };
-    saveState({ schemaVersion: SCHEMA_VERSION, manifestUrl, playlists, activePlaylistId, history: practiceHistory });
+    persistFullState();
   }
 
   /** Records one study attempt for `key` and persists it immediately -- passed into each study mode as onAttempt. */
   function logAttempt(key, mode, accuracy) {
     practiceHistory = recordAttempt(practiceHistory, key, mode, accuracy);
-    saveState({ schemaVersion: SCHEMA_VERSION, manifestUrl, playlists, activePlaylistId, history: practiceHistory });
+    persistFullState();
   }
 
   const styleSelect = renderStyleOptions(manifest, mix.defaultStyleId);
@@ -452,6 +466,8 @@ function initSelectionUi(manifest, manifestUrl) {
     renderBookTree(manifest, selected, verseSelections, rerender, practiceHistory);
     renderSummary(selected, manifest, verseSelections);
     renderMixEditorIfOpen();
+    renderControlsScopeSongOptions();
+    syncControlsPanelFromState();
   }
 
   document.getElementById("selectAllBtn").addEventListener("click", () => {
@@ -505,6 +521,8 @@ function initSelectionUi(manifest, manifestUrl) {
     renderBookTree(manifest, selected, verseSelections, rerender, practiceHistory);
     renderSummary(selected, manifest, verseSelections);
     renderMixEditorIfOpen();
+    renderControlsScopeSongOptions();
+    syncControlsPanelFromState();
     persistActivePlaylist(); // record the new activePlaylistId itself
   }
 
@@ -547,6 +565,8 @@ function initSelectionUi(manifest, manifestUrl) {
     renderBookTree(manifest, selected, verseSelections, rerender, practiceHistory);
     renderSummary(selected, manifest, verseSelections);
     renderMixEditorIfOpen();
+    renderControlsScopeSongOptions();
+    syncControlsPanelFromState();
     persistActivePlaylist();
   });
 
@@ -725,6 +745,154 @@ function initSelectionUi(manifest, manifestUrl) {
     persistActivePlaylist();
   });
 
+  // --- Karaoke Controls (AI_TODO.md item 4): pitch/speed/key-lock/count-in/
+  // reverb, resolved through three tiers (app default -> playlist override
+  // -> section/"song" override). The scope selector below decides which
+  // tier a slider change writes to; every control always *displays* the
+  // fully-resolved value for whichever tier is currently selected, so a
+  // Pathfinder switching scopes sees a coherent live preview rather than
+  // raw, possibly-unset override fields. ---
+  const controlsScopeSelect = document.getElementById("controlsScopeSelect");
+  const controlsScopeSongSelect = document.getElementById("controlsScopeSongSelect");
+  const clearControlsOverrideBtn = document.getElementById("clearControlsOverrideBtn");
+  const pitchSlider = document.getElementById("pitchSlider");
+  const pitchValueLabel = document.getElementById("pitchValueLabel");
+  const rateSlider = document.getElementById("rateSlider");
+  const rateValueLabel = document.getElementById("rateValueLabel");
+  const keyLockCheckbox = document.getElementById("keyLockCheckbox");
+  const countInSlider = document.getElementById("countInSlider");
+  const countInValueLabel = document.getElementById("countInValueLabel");
+  const reverbSlider = document.getElementById("reverbSlider");
+  const reverbValueLabel = document.getElementById("reverbValueLabel");
+
+  function renderControlsScopeSongOptions() {
+    const previous = controlsScopeSongSelect.value;
+    controlsScopeSongSelect.innerHTML = "";
+    for (const key of selected) {
+      const section = findSection(manifest, key);
+      if (!section) continue;
+      const option = document.createElement("option");
+      option.value = key;
+      option.textContent = passageLabel(section);
+      controlsScopeSongSelect.appendChild(option);
+    }
+    if ([...controlsScopeSongSelect.options].some((o) => o.value === previous)) controlsScopeSongSelect.value = previous;
+  }
+
+  function songKeyForScope() {
+    return controlsScopeSelect.value === "song" ? controlsScopeSongSelect.value || null : null;
+  }
+
+  /** The fully-resolved settings for whichever tier the scope selector currently points at -- what the sliders should display right now. */
+  function resolvedControlsForDisplay() {
+    const record = findPlaylist(playlists, activePlaylistId);
+    const scope = controlsScopeSelect.value;
+    if (scope === "app") return { ...appKaraokeControls };
+    if (scope === "playlist") return resolveKaraokeControls(appKaraokeControls, record.karaokeControlsOverride, null);
+    const songKey = songKeyForScope();
+    const sectionOverride = songKey ? record.karaokeControlsSectionOverrides?.[songKey] : null;
+    return resolveKaraokeControls(appKaraokeControls, record.karaokeControlsOverride, sectionOverride);
+  }
+
+  function updateControlLabels(resolved) {
+    pitchValueLabel.textContent = resolved.pitchSemitones === 0 ? "Normal" : `${resolved.pitchSemitones > 0 ? "+" : ""}${resolved.pitchSemitones} st`;
+    rateValueLabel.textContent = `${Math.round(resolved.rate * 100)}%`;
+    countInValueLabel.textContent = resolved.countInSeconds === 0 ? "Off" : `${resolved.countInSeconds}s`;
+    reverbValueLabel.textContent = resolved.reverbAmount === 0 ? "Off" : `${Math.round(resolved.reverbAmount * 100)}%`;
+  }
+
+  function updateClearOverrideButton() {
+    const record = findPlaylist(playlists, activePlaylistId);
+    const scope = controlsScopeSelect.value;
+    let hasOverride = false;
+    if (scope === "playlist") hasOverride = Object.keys(record.karaokeControlsOverride ?? {}).length > 0;
+    else if (scope === "song") {
+      const songKey = songKeyForScope();
+      hasOverride = !!songKey && Object.keys(record.karaokeControlsSectionOverrides?.[songKey] ?? {}).length > 0;
+    }
+    clearControlsOverrideBtn.hidden = scope === "app";
+    clearControlsOverrideBtn.disabled = !hasOverride;
+  }
+
+  function syncControlsPanelFromState() {
+    const resolved = resolvedControlsForDisplay();
+    pitchSlider.value = String(resolved.pitchSemitones);
+    rateSlider.value = String(resolved.rate);
+    keyLockCheckbox.checked = resolved.keyLock;
+    countInSlider.value = String(resolved.countInSeconds);
+    reverbSlider.value = String(resolved.reverbAmount);
+    updateControlLabels(resolved);
+    updateClearOverrideButton();
+  }
+
+  /** Writes one field's new value into whichever tier the scope selector currently points at -- app default (a direct edit), or a *partial* update to the playlist/section override object (only this field, leaving whatever else that tier has already customized untouched). */
+  function writeControlChange(field, value) {
+    const scope = controlsScopeSelect.value;
+    const clamped = clampKaraokeControls({ [field]: value });
+    if (scope === "app") {
+      appKaraokeControls = { ...appKaraokeControls, ...clamped };
+    } else if (scope === "playlist") {
+      const record = findPlaylist(playlists, activePlaylistId);
+      record.karaokeControlsOverride = { ...(record.karaokeControlsOverride ?? {}), ...clamped };
+    } else {
+      const songKey = songKeyForScope();
+      if (!songKey) return;
+      const record = findPlaylist(playlists, activePlaylistId);
+      record.karaokeControlsSectionOverrides = {
+        ...(record.karaokeControlsSectionOverrides ?? {}),
+        [songKey]: { ...(record.karaokeControlsSectionOverrides?.[songKey] ?? {}), ...clamped },
+      };
+    }
+    persistFullState();
+    syncControlsPanelFromState();
+  }
+
+  controlsScopeSelect.addEventListener("change", () => {
+    controlsScopeSongSelect.hidden = controlsScopeSelect.value !== "song";
+    syncControlsPanelFromState();
+  });
+  controlsScopeSongSelect.addEventListener("change", () => syncControlsPanelFromState());
+
+  clearControlsOverrideBtn.addEventListener("click", () => {
+    const scope = controlsScopeSelect.value;
+    const record = findPlaylist(playlists, activePlaylistId);
+    if (scope === "playlist") {
+      record.karaokeControlsOverride = {};
+    } else if (scope === "song") {
+      const songKey = songKeyForScope();
+      if (songKey) {
+        const rest = { ...(record.karaokeControlsSectionOverrides ?? {}) };
+        delete rest[songKey];
+        record.karaokeControlsSectionOverrides = rest;
+      }
+    }
+    persistFullState();
+    syncControlsPanelFromState();
+  });
+
+  pitchSlider.addEventListener("input", () => writeControlChange("pitchSemitones", Number(pitchSlider.value)));
+  rateSlider.addEventListener("input", () => writeControlChange("rate", Number(rateSlider.value)));
+  keyLockCheckbox.addEventListener("change", () => writeControlChange("keyLock", keyLockCheckbox.checked));
+  countInSlider.addEventListener("input", () => writeControlChange("countInSeconds", Number(countInSlider.value)));
+  reverbSlider.addEventListener("input", () => writeControlChange("reverbAmount", Number(reverbSlider.value)));
+
+  renderControlsScopeSongOptions();
+  syncControlsPanelFromState();
+
+  // Live-resolves per block's actual section -- shared across every study
+  // mode and Sleep Mode alike, since they all drive the same `engine`
+  // instance (this is also how Sleep Mode "inherits" these settings per
+  // AI_TODO.md's decision, with no extra wiring needed there).
+  engine.setKaraokeControlsResolver((sectionKey) => {
+    const record = findPlaylist(playlists, activePlaylistId);
+    return resolveKaraokeControls(appKaraokeControls, record.karaokeControlsOverride, record.karaokeControlsSectionOverrides?.[sectionKey]);
+  });
+
+  mountAbLoopPicker(document.getElementById("abLoopPicker"), engine, manifest, {
+    loopThisBlockBtn: document.getElementById("loopThisBlockBtn"),
+    clearLoopBtn: document.getElementById("clearLoopBtn"),
+  });
+
   document.getElementById("startKaraokeBtn").addEventListener("click", () => {
     if (selected.size === 0) {
       renderFallbackNote(manifest, []);
@@ -788,7 +956,7 @@ function initSelectionUi(manifest, manifestUrl) {
       vocalVolume,
       onVolumesChange: (volumes) => {
         record.studyOptions = { ...(record.studyOptions ?? defaultStudyOptions()), ...volumes };
-        saveState({ schemaVersion: SCHEMA_VERSION, manifestUrl, playlists, activePlaylistId, history: practiceHistory });
+        persistFullState();
       },
     });
   });
