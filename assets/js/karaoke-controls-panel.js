@@ -1,13 +1,15 @@
 import { canonicalWords, findSection, passageLabel } from "./library.js";
-import { loopRangeForCanonicalIndices } from "./karaoke-controls.js";
+import { loopRangeForCanonicalIndices, verseRangesForSection } from "./karaoke-controls.js";
 
 /**
- * The A/B loop word-picker (AI_TODO.md item 4): drag across words to loop
- * just that range, mirroring mix-editor.js's own drag-to-select word-chip
- * strip (same Pointer Events approach, same word-chip/word-strip/
- * mix-verse-line CSS classes -- this reuses that visual language rather
- * than inventing a second one) but painting a loop range instead of a
- * genre.
+ * The A/B loop picker (AI_TODO.md item 4): verse and whole-chapter buttons
+ * are the primary way to set a loop -- one click loops everything currently
+ * sung under that verse number, or the entire passage currently playing,
+ * for drilling a hard bit repeatedly. (An earlier version of this picker
+ * let a Pathfinder drag-select an arbitrary word range instead; that was
+ * replaced with this coarser, faster verse/chapter granularity, which is
+ * what's actually needed for most repeat-drilling and doesn't require
+ * precise word-by-word dragging to hit the right boundary.)
  *
  * Deliberately NOT part of the persisted three-tier settings model (see
  * karaoke-controls.js's doc comment) -- it's a live "drill this bit right
@@ -16,33 +18,38 @@ import { loopRangeForCanonicalIndices } from "./karaoke-controls.js";
  * Pathfinder to pick a song up front the way the settings scope selector
  * does. Disabled/empty until something is actually playing.
  */
-export function mountAbLoopPicker(container, engine, manifest, { loopThisBlockBtn, clearLoopBtn }) {
+export function mountAbLoopPicker(container, engine, manifest, { clearLoopBtn }) {
   container.innerHTML = "";
-  container.className = "word-strip ab-loop-picker";
+  container.className = "ab-loop-picker";
 
   let currentSectionKey = null;
   let canonical = [];
-  let chips = [];
-  let dragging = false;
-  let dragStart = null;
-  let dragEnd = null;
-  let loopActive = false;
+  let buttons = []; // {el, startIndex, endIndex}
 
-  function setButtonsEnabled(hasBlock) {
-    loopThisBlockBtn.disabled = !hasBlock;
-    clearLoopBtn.disabled = !hasBlock || !loopActive;
+  function setActiveButton(startIndex, endIndex) {
+    for (const b of buttons) b.el.classList.toggle("active", b.startIndex === startIndex && b.endIndex === endIndex);
   }
 
-  function highlightRange(lo, hi) {
-    chips.forEach((chip, i) => chip.classList.toggle("in-loop", loopActive && i >= lo && i <= hi));
+  function clearActiveButton() {
+    for (const b of buttons) b.el.classList.remove("active");
   }
 
-  function previewRange(lo, hi) {
-    chips.forEach((chip, i) => chip.classList.toggle("selecting", i >= lo && i <= hi));
+  function applyLoop(startIndex, endIndex) {
+    const range = loopRangeForCanonicalIndices(engine.getProgramBlocks(), currentSectionKey, startIndex, endIndex);
+    if (!range) return;
+    engine.setLoopRange(range);
+    setActiveButton(startIndex, endIndex);
+    clearLoopBtn.disabled = false;
   }
 
-  function clearPreview() {
-    for (const chip of chips) chip.classList.remove("selecting");
+  function makeButton(label, startIndex, endIndex, extraClass = "") {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `btn tiny secondary loop-scope-btn${extraClass ? ` ${extraClass}` : ""}`;
+    btn.textContent = label;
+    btn.addEventListener("click", () => applyLoop(startIndex, endIndex));
+    buttons.push({ el: btn, startIndex, endIndex });
+    return btn;
   }
 
   function renderSection(sectionKey) {
@@ -50,105 +57,35 @@ export function mountAbLoopPicker(container, engine, manifest, { loopThisBlockBt
     const section = sectionKey ? findSection(manifest, sectionKey) : null;
     canonical = section ? canonicalWords(section) : [];
     container.innerHTML = "";
-    chips = [];
-    loopActive = false;
+    buttons = [];
+    clearLoopBtn.disabled = true;
 
-    if (!section) {
-      setButtonsEnabled(false);
-      return;
-    }
+    if (!section) return;
 
     const heading = document.createElement("p");
     heading.className = "mix-editor-hint";
     heading.textContent = `Looping within: ${passageLabel(section)}`;
     container.appendChild(heading);
 
-    let verseLine = null;
-    let openVerse;
-    canonical.forEach((w, i) => {
-      if (verseLine === null || w.verse !== openVerse) {
-        openVerse = w.verse;
-        verseLine = document.createElement("div");
-        verseLine.className = "mix-verse-line";
-        const num = document.createElement("sup");
-        num.className = "verse-num";
-        num.textContent = String(openVerse);
-        verseLine.appendChild(num);
-        container.appendChild(verseLine);
-      }
-
-      const chip = document.createElement("span");
-      chip.className = "word-chip loop-word-chip";
-      chip.textContent = w.word;
-
-      chip.addEventListener("pointerdown", (event) => {
-        event.preventDefault();
-        try {
-          chip.releasePointerCapture(event.pointerId);
-        } catch {
-          // Not all browsers implicitly capture on touch; nothing to release.
-        }
-        dragging = true;
-        dragStart = dragEnd = i;
-        previewRange(i, i);
-      });
-      chip.addEventListener("pointerenter", () => {
-        if (!dragging) return;
-        dragEnd = i;
-        previewRange(Math.min(dragStart, dragEnd), Math.max(dragStart, dragEnd));
-      });
-
-      verseLine.appendChild(chip);
-      chips.push(chip);
-    });
-
-    setButtonsEnabled(true);
+    const row = document.createElement("div");
+    row.className = "loop-scope-row";
+    if (canonical.length > 0) row.appendChild(makeButton("Whole Chapter", 0, canonical.length - 1, "loop-scope-chapter"));
+    for (const { verse, startIndex, endIndex } of verseRangesForSection(canonical)) {
+      row.appendChild(makeButton(`Verse ${verse}`, startIndex, endIndex));
+    }
+    container.appendChild(row);
   }
-
-  function commitDrag() {
-    if (!dragging) return;
-    dragging = false;
-    clearPreview();
-    const lo = Math.min(dragStart, dragEnd);
-    const hi = Math.max(dragStart, dragEnd);
-    const range = loopRangeForCanonicalIndices(engine.getProgramBlocks(), currentSectionKey, lo, hi);
-    if (!range) return;
-    engine.setLoopRange(range);
-    loopActive = true;
-    highlightRange(lo, hi);
-    setButtonsEnabled(true);
-  }
-
-  function cancelDrag() {
-    dragging = false;
-    clearPreview();
-  }
-
-  loopThisBlockBtn.addEventListener("click", () => {
-    const { block, blockIndex } = engine.getState();
-    if (!block) return;
-    engine.setLoopRange({ startBlockIndex: blockIndex, startTime: block.inTime, endBlockIndex: blockIndex, endTime: block.outTime });
-    loopActive = true;
-    const indices = [...block.canonicalIndexMap.values()];
-    if (indices.length > 0) highlightRange(Math.min(...indices), Math.max(...indices));
-    setButtonsEnabled(true);
-  });
 
   clearLoopBtn.addEventListener("click", () => {
     engine.setLoopRange(null);
-    loopActive = false;
-    highlightRange(-1, -1);
-    setButtonsEnabled(!!engine.getState().block);
+    clearActiveButton();
+    clearLoopBtn.disabled = true;
   });
-
-  window.addEventListener("pointerup", commitDrag);
-  window.addEventListener("pointercancel", cancelDrag);
 
   const unsubscribers = [
     engine.on("blockchange", (block) => {
       const sectionKey = block?.sectionKey ?? null;
       if (sectionKey !== currentSectionKey) renderSection(sectionKey);
-      else setButtonsEnabled(true);
     }),
     engine.on("ended", () => renderSection(null)),
   ];
@@ -159,8 +96,6 @@ export function mountAbLoopPicker(container, engine, manifest, { loopThisBlockBt
   return {
     unmount() {
       for (const off of unsubscribers) off();
-      window.removeEventListener("pointerup", commitDrag);
-      window.removeEventListener("pointercancel", cancelDrag);
     },
   };
 }

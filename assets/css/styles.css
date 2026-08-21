@@ -614,21 +614,31 @@ details.panel:not([open]) h2 {
 }
 
 .ab-loop-picker {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
 }
 
-/* A neutral, single-color chip (unlike mix-editor's per-style --chip-color)
-   -- this picker isn't painting a genre, just marking a loop range. */
-.loop-word-chip {
-  --chip-color: var(--teal);
+/* Verse/whole-chapter loop buttons (karaoke-controls-panel.js) -- the
+   primary way to set an A/B loop, one click per verse rather than dragging
+   a word-by-word range. */
+.loop-scope-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
 }
 
-.loop-word-chip.in-loop {
+.loop-scope-btn.active,
+.loop-scope-btn.active:hover,
+.loop-scope-btn.active:focus-visible {
   background: var(--teal);
   color: #fff;
   border-color: var(--teal-dark);
+}
+
+/* The "Whole Chapter" button stands apart from the individual verse
+   buttons that follow it -- a visual break, not just another verse. */
+.loop-scope-chapter {
+  font-weight: 800;
+  margin-right: 0.3rem;
 }
 
 /* Playlist sharing (AI_TODO.md item 5) */

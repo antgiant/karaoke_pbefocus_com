@@ -69,8 +69,32 @@ export function semitonesToRatio(semitones) {
 }
 
 /**
+ * Groups a section's canonical words by verse number, in first-appearance
+ * order, giving each verse's canonical index range -- verse (and "whole
+ * chapter," the full array) is the A/B loop picker's primary way to set a
+ * loop (karaoke-controls-panel.js), rather than dragging an arbitrary
+ * word-by-word range. Words with no verse number (spoken filler, never part
+ * of the addressable text) are skipped -- there's no verse to loop them
+ * under.
+ */
+export function verseRangesForSection(canonical) {
+  const ranges = [];
+  let current = null;
+  canonical.forEach((w, i) => {
+    if (w.verse === null || w.verse === undefined) return;
+    if (!current || current.verse !== w.verse) {
+      current = { verse: w.verse, startIndex: i, endIndex: i };
+      ranges.push(current);
+    } else {
+      current.endIndex = i;
+    }
+  });
+  return ranges;
+}
+
+/**
  * Locates the program block(s) spanning a canonical word-index range within
- * one section, for the A/B loop's "drag a range on the lyrics" picker (see
+ * one section, for the A/B loop's verse/chapter picker (see
  * karaoke-controls-panel.js) -- translates {sectionKey, startIndex,
  * endIndex} (canonical, mix-editor-style) into
  * {startBlockIndex, startTime, endBlockIndex, endTime}, the shape

@@ -889,7 +889,6 @@ function initSelectionUi(manifest, manifestUrl) {
   });
 
   mountAbLoopPicker(document.getElementById("abLoopPicker"), engine, manifest, {
-    loopThisBlockBtn: document.getElementById("loopThisBlockBtn"),
     clearLoopBtn: document.getElementById("clearLoopBtn"),
   });
 

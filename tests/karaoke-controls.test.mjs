@@ -6,6 +6,7 @@ import {
   resolveKaraokeControls,
   semitonesToRatio,
   loopRangeForCanonicalIndices,
+  verseRangesForSection,
   KARAOKE_CONTROLS_LIMITS,
 } from "../assets/js/karaoke-controls.js";
 
@@ -121,4 +122,38 @@ test("loopRangeForCanonicalIndices: no matching block/index anywhere -> null, no
   const blocks = [makeBlock({ sectionKey: "a", words: [{ ci: 0, start: 0, end: 1 }] })];
   assert.equal(loopRangeForCanonicalIndices(blocks, "a", 5, 6), null);
   assert.equal(loopRangeForCanonicalIndices([], "a", 0, 0), null);
+});
+
+test("verseRangesForSection: groups contiguous same-verse words into one range each, in order", () => {
+  const canonical = [
+    { word: "a", verse: 2 },
+    { word: "b", verse: 2 },
+    { word: "c", verse: 3 },
+    { word: "d", verse: 3 },
+    { word: "e", verse: 3 },
+    { word: "f", verse: 4 },
+  ];
+  assert.deepEqual(verseRangesForSection(canonical), [
+    { verse: 2, startIndex: 0, endIndex: 1 },
+    { verse: 3, startIndex: 2, endIndex: 4 },
+    { verse: 4, startIndex: 5, endIndex: 5 },
+  ]);
+});
+
+test("verseRangesForSection: a single-word verse still gets its own range", () => {
+  const canonical = [{ word: "a", verse: 1 }];
+  assert.deepEqual(verseRangesForSection(canonical), [{ verse: 1, startIndex: 0, endIndex: 0 }]);
+});
+
+test("verseRangesForSection: words with no verse (spoken filler) are skipped, not grouped into a bogus range", () => {
+  const canonical = [
+    { word: "title", verse: null },
+    { word: "a", verse: 1 },
+    { word: "b", verse: 1 },
+  ];
+  assert.deepEqual(verseRangesForSection(canonical), [{ verse: 1, startIndex: 1, endIndex: 2 }]);
+});
+
+test("verseRangesForSection: empty input produces no ranges", () => {
+  assert.deepEqual(verseRangesForSection([]), []);
 });
