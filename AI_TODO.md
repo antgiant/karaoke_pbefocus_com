@@ -123,43 +123,6 @@ would need a way to enumerate sections across all playlists),
 
 ---
 
-## 9. [ ] Font-size control for the karaoke display
-
-**Goal:** let a Pathfinder increase/decrease the text size of the karaoke
-word display -- useful for a phone propped up across a room in Sleep Mode,
-or general readability preference.
-
-**Current state (verified against code):**
-- `.karaoke-word`/`.karaoke-line`/`.karaoke-heading` and friends in
-  `styles.css` use fixed `rem` font-size values with no CSS custom property
-  backing them -- confirmed no font-size-related custom property exists at
-  `:root` today, so there's nothing to just multiply; sizes would need to
-  be re-expressed relative to a new scale variable first.
-- No existing settings surface holds a persisted "text size" preference --
-  would need a new field, likely in `storage.js`'s top-level state (an
-  app-wide preference, since it's about the device/viewing conditions
-  rather than the passage) or alongside `studyOptions` if scoped
-  per-playlist instead.
-
-**Decided (confirmed with the user):**
-- **Per-mode, not app-wide** -- each mode (regular Study panel vs. Sleep
-  Mode) gets its own text-size setting, since viewing conditions differ
-  (a phone held close during active study vs. propped up across a dark
-  room overnight). This means a separate persisted value per mode, not one
-  shared app-wide number.
-- **A continuous slider**, not a fixed Small/Medium/Large set -- needs
-  testing across the range to make sure text still fits its container well
-  at both extremes.
-
-**Relevant files:** `assets/css/styles.css` (`.karaoke-word`,
-`.karaoke-line`, `.karaoke-heading`, `.sleep-overlay .karaoke-word` -- the
-Sleep-Mode-specific overrides would need to scale too), `assets/js/
-storage.js` (if persisted app-wide), wherever the new control's UI lives
-(likely near the other Study panel controls, or inside item 4's Karaoke
-Controls section if that ships first).
-
----
-
 ## 10. [ ] Undo/redo in the mix editor
 
 **Goal:** let a Pathfinder undo (and redo) a mistaken paint stroke in the

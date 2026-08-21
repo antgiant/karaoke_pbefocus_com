@@ -36,10 +36,19 @@ export function mountSleepMode(
   program,
   manifest,
   mix,
-  { styleLabelFor = (id) => id, verseFilter, instrumentalVolume = 1, vocalVolume = 1, onVolumesChange } = {}
+  {
+    styleLabelFor = (id) => id,
+    verseFilter,
+    instrumentalVolume = 1,
+    vocalVolume = 1,
+    onVolumesChange,
+    textScale = 1,
+    onTextScaleChange,
+  } = {}
 ) {
   const overlay = document.createElement("div");
   overlay.className = "sleep-overlay";
+  overlay.style.setProperty("--karaoke-font-scale", String(textScale));
 
   const topbar = document.createElement("div");
   topbar.className = "sleep-topbar";
@@ -95,11 +104,37 @@ export function mountSleepMode(
     });
   }
 
+  // Text size (AI_TODO.md item 9) -- Sleep Mode's own scale, independent of
+  // the Study panel's: a phone propped up across a dark room wants a
+  // different size than one held close during active study.
+  const textSizeLabel = document.createElement("label");
+  textSizeLabel.className = "sleep-volume-control";
+  const textSizeSlider = document.createElement("input");
+  textSizeSlider.type = "range";
+  textSizeSlider.min = "0.7";
+  textSizeSlider.max = "1.8";
+  textSizeSlider.step = "0.05";
+  textSizeSlider.value = String(textScale);
+  textSizeSlider.setAttribute("aria-label", "Karaoke word display text size");
+  textSizeLabel.append("🔠 ", textSizeSlider);
+  textSizeSlider.addEventListener("input", () => {
+    overlay.style.setProperty("--karaoke-font-scale", textSizeSlider.value);
+    onTextScaleChange?.(Number(textSizeSlider.value));
+  });
+
   const exitBtn = document.createElement("button");
   exitBtn.type = "button";
   exitBtn.className = "btn secondary";
   exitBtn.textContent = "Exit Sleep Mode";
-  topbar.append(timerLabel, timerSelect, shuffleLabel, instrumentalControl.label, vocalControl.label, exitBtn);
+  topbar.append(
+    timerLabel,
+    timerSelect,
+    shuffleLabel,
+    instrumentalControl.label,
+    vocalControl.label,
+    textSizeLabel,
+    exitBtn
+  );
 
   const karaokeContainer = document.createElement("div");
   const controlsContainer = document.createElement("div");

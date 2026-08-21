@@ -24,6 +24,11 @@ function defaultState() {
     // of resolveKaraokeControls' three-tier fallback, shared across every
     // playlist unless a playlist/section override supersedes it.
     karaokeControls: defaultKaraokeControls(),
+    // Karaoke word-display text size (AI_TODO.md item 9) -- one number per
+    // mode, not a single app-wide value: the Study panel and Sleep Mode are
+    // viewed under different conditions (phone held close vs. propped up
+    // across a dark room), so each keeps its own scale independently.
+    karaokeTextScale: { study: 1, sleep: 1 },
   };
 }
 

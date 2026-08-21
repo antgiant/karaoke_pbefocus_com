@@ -393,7 +393,15 @@ function initSelectionUi(manifest, manifestUrl) {
   let appKaraokeControls = state.karaokeControls;
 
   function persistFullState() {
-    saveState({ schemaVersion: SCHEMA_VERSION, manifestUrl, playlists, activePlaylistId, history: practiceHistory, karaokeControls: appKaraokeControls });
+    saveState({
+      schemaVersion: SCHEMA_VERSION,
+      manifestUrl,
+      playlists,
+      activePlaylistId,
+      history: practiceHistory,
+      karaokeControls: appKaraokeControls,
+      karaokeTextScale,
+    });
   }
 
   // Live, in-memory working copies of the active playlist's data -- same
@@ -781,6 +789,24 @@ function initSelectionUi(manifest, manifestUrl) {
   const reverbSlider = document.getElementById("reverbSlider");
   const reverbValueLabel = document.getElementById("reverbValueLabel");
 
+  // Study panel text size (AI_TODO.md item 9) -- its own persisted value,
+  // independent of the three-tier Karaoke Controls above and of Sleep
+  // Mode's own slider (wired where mountSleepMode is called below).
+  const studyTextSizeSlider = document.getElementById("studyTextSizeSlider");
+  const studyTextSizeValueLabel = document.getElementById("studyTextSizeValueLabel");
+  const karaokeViewEl = document.getElementById("karaokeView");
+  let karaokeTextScale = { study: 1, sleep: 1, ...state.karaokeTextScale };
+  studyTextSizeSlider.value = String(karaokeTextScale.study);
+  studyTextSizeValueLabel.textContent = `${Math.round(karaokeTextScale.study * 100)}%`;
+  karaokeViewEl.style.setProperty("--karaoke-font-scale", String(karaokeTextScale.study));
+  studyTextSizeSlider.addEventListener("input", () => {
+    const scale = Number(studyTextSizeSlider.value);
+    karaokeTextScale = { ...karaokeTextScale, study: scale };
+    studyTextSizeValueLabel.textContent = `${Math.round(scale * 100)}%`;
+    karaokeViewEl.style.setProperty("--karaoke-font-scale", String(scale));
+    persistFullState();
+  });
+
   function renderControlsScopeSongOptions() {
     const previous = controlsScopeSongSelect.value;
     controlsScopeSongSelect.innerHTML = "";
@@ -971,6 +997,11 @@ function initSelectionUi(manifest, manifestUrl) {
       vocalVolume,
       onVolumesChange: (volumes) => {
         record.studyOptions = { ...(record.studyOptions ?? defaultStudyOptions()), ...volumes };
+        persistFullState();
+      },
+      textScale: karaokeTextScale.sleep,
+      onTextScaleChange: (scale) => {
+        karaokeTextScale = { ...karaokeTextScale, sleep: scale };
         persistFullState();
       },
     });
