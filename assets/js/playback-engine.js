@@ -655,6 +655,20 @@ export function createPlaybackEngine() {
       loopSeeking = false;
     },
 
+    /**
+     * Resumes the shared AudioContext without touching playback state --
+     * play() does this too, but always as a prelude to starting/resuming
+     * block playback from wherever blockIndex is. A mode that wants to jump
+     * straight to an arbitrary block+time via skipToBlock() (e.g.
+     * name-that-passage.js's "Play Sample", which may be the very first
+     * playback of the session) needs the resume on its own, from inside its
+     * own user-gesture handler, without also triggering play()'s block-0
+     * fresh-start branch.
+     */
+    resumeAudioContext() {
+      return audioContext?.resume().catch(() => {});
+    },
+
     play() {
       audioContext?.resume().catch(() => {}); // must be called from inside a user-gesture handler to satisfy autoplay policy -- play() always is
       if (blockIndex === -1) {

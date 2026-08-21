@@ -156,9 +156,26 @@
             </div>
           </div>
 
+          <h3 class="karaoke-mode-heading">Name that Passage</h3>
+          <div class="karaoke-mode-options">
+            <div class="hint-slider-row">
+              <span class="hint-slider-endlabel">Instrumental only</span>
+              <input type="range" id="ntpHelpSlider" min="0" max="100" step="5" value="100" aria-label="Help level, from instrumental-only/no words to full audio with words" />
+              <span class="hint-slider-endlabel">Full help</span>
+            </div>
+            <div class="style-select-row" id="ntpInputRow">
+              <label for="ntpInputSelect">Input method</label>
+              <select id="ntpInputSelect">
+                <option value="typed">Typed</option>
+                <option value="voice">Voice</option>
+              </select>
+            </div>
+          </div>
+
           <div class="style-select-row">
             <button id="startKaraokeBtn" type="button" class="btn">Start Studying</button>
             <button id="sleepModeBtn" type="button" class="btn secondary">🌙 Sleep Mode</button>
+            <button id="startNameThatPassageBtn" type="button" class="btn secondary">🎧 Name that Passage</button>
           </div>
           <p id="fallbackNote" class="fallback-note" hidden></p>
           <div id="karaokeView"></div>

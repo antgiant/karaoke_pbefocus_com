@@ -45,7 +45,7 @@ export function makeSection({ book = "1 John", chapter = 1, versesWordCounts = [
  */
 export function makeFakeEngine({ blocks }) {
   const listeners = { blockchange: [], timeupdate: [], ended: [], playstate: [] };
-  const calls = { pause: 0, skipToBlock: [], setVocalDuckPredicate: [] };
+  const calls = { pause: 0, skipToBlock: [], setVocalDuckPredicate: [], setStemTrackVolumes: [], resumeAudioContext: 0, loadProgram: [] };
   let currentBlock = null;
 
   return {
@@ -66,6 +66,9 @@ export function makeFakeEngine({ blocks }) {
     getProgramBlocks() {
       return blocks;
     },
+    loadProgram(program) {
+      calls.loadProgram.push(program);
+    },
     pause() {
       calls.pause += 1;
     },
@@ -74,6 +77,12 @@ export function makeFakeEngine({ blocks }) {
     },
     setVocalDuckPredicate(predicate) {
       calls.setVocalDuckPredicate.push(predicate);
+    },
+    setStemTrackVolumes(opts) {
+      calls.setStemTrackVolumes.push(opts);
+    },
+    resumeAudioContext() {
+      calls.resumeAudioContext += 1;
     },
   };
 }

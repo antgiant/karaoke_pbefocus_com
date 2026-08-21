@@ -32,6 +32,7 @@ import { createPlaybackEngine } from "./playback-engine.js";
 import { mountUnscored } from "./study-modes/unscored.js";
 import { mountTypeAhead } from "./study-modes/type-ahead.js";
 import { mountSingAlong, isSingAlongSupported } from "./study-modes/sing-along.js";
+import { mountNameThatPassage } from "./study-modes/name-that-passage.js";
 import { mountSleepMode } from "./sleep-mode.js";
 import { mountPlayerControls } from "./player-controls.js";
 import { clampKaraokeControls, resolveKaraokeControls } from "./karaoke-controls.js";
@@ -436,6 +437,8 @@ function initSelectionUi(manifest, manifestUrl) {
       scored: scoredCheckbox.checked,
       scoredInput: scoredInputSelect.value,
       duckVocals: duckVocalsCheckbox.checked,
+      nameThatPassageHelp: Math.min(100, Math.max(0, Number(ntpHelpSlider.value) || 0)),
+      nameThatPassageInput: ntpInputSelect.value,
     };
     persistFullState();
   }
@@ -698,6 +701,8 @@ function initSelectionUi(manifest, manifestUrl) {
   const scoredCheckbox = document.getElementById("scoredCheckbox");
   const scoredOptionsRow = document.getElementById("scoredOptionsRow");
   const scoredInputSelect = document.getElementById("scoredInputSelect");
+  const ntpHelpSlider = document.getElementById("ntpHelpSlider");
+  const ntpInputSelect = document.getElementById("ntpInputSelect");
 
   // Slider and the "enter the percent directly" number input always show
   // the same value -- either one can drive it.
@@ -734,10 +739,21 @@ function initSelectionUi(manifest, manifestUrl) {
     scoredCheckbox.checked = options.scored;
     scoredInputSelect.value = options.scoredInput ?? (isSingAlongSupported() ? "singalong" : "typeahead");
     updateScoredOptionsVisibility();
+    ntpHelpSlider.value = String(options.nameThatPassageHelp ?? 100);
+    ntpInputSelect.value = options.nameThatPassageInput ?? (isSingAlongSupported() ? "voice" : "typed");
   }
   syncStudyOptionsFromActivePlaylist();
 
-  for (const control of [hintLevelSlider, hintLevelInput, rampCheckbox, lengthMatchedCheckbox, duckVocalsCheckbox, scoredInputSelect]) {
+  for (const control of [
+    hintLevelSlider,
+    hintLevelInput,
+    rampCheckbox,
+    lengthMatchedCheckbox,
+    duckVocalsCheckbox,
+    scoredInputSelect,
+    ntpHelpSlider,
+    ntpInputSelect,
+  ]) {
     control.addEventListener("change", () => persistActivePlaylist());
   }
   scoredCheckbox.addEventListener("change", () => {
@@ -958,6 +974,35 @@ function initSelectionUi(manifest, manifestUrl) {
         persistFullState();
       },
     });
+  });
+
+  document.getElementById("startNameThatPassageBtn").addEventListener("click", () => {
+    if (selected.size === 0) {
+      alert("Select at least one chapter or verse range first.");
+      return;
+    }
+    const verseFilter = buildVerseFilter(selected, verseSelections);
+    unmountStudyView?.();
+    unmountPlayerControls?.();
+    unmountStudyView = null;
+    unmountPlayerControls = null;
+    const karaokeView = document.getElementById("karaokeView");
+    document.getElementById("playerControls").innerHTML = "";
+    const getNtpOptions = () => ({
+      helpLevel: Math.min(100, Math.max(0, Number(ntpHelpSlider.value) || 0)) / 100,
+      inputMethod: ntpInputSelect.value,
+    });
+    unmountStudyView = mountNameThatPassage(
+      karaokeView,
+      engine,
+      manifest,
+      mix,
+      selected,
+      verseFilter,
+      getNtpOptions,
+      logAttempt,
+      (fallbacks) => renderFallbackNote(manifest, fallbacks)
+    );
   });
 }
 

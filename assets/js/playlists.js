@@ -38,6 +38,13 @@ export function defaultStudyOptions() {
     // normal full-mix balance, same as before these sliders existed.
     instrumentalVolume: 1,
     vocalVolume: 1,
+    // "Name that Passage" (AI_TODO.md item 6): helpLevel 0-100 (full help by
+    // default, same "start easy" philosophy as blankPercent's 0-default),
+    // and nameThatPassageInput follows scoredInput's own null-means-
+    // "auto-detect by browser capability, not yet an explicit choice"
+    // convention.
+    nameThatPassageHelp: 100,
+    nameThatPassageInput: null,
   };
 }
 
