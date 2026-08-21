@@ -6,7 +6,7 @@
 // run in the same `node --test` process.
 import { JSDOM } from "jsdom";
 
-const GLOBAL_KEYS = ["window", "document", "HTMLElement", "Node", "Event", "KeyboardEvent", "MouseEvent", "localStorage"];
+const GLOBAL_KEYS = ["window", "document", "HTMLElement", "Node", "Event", "KeyboardEvent", "MouseEvent", "localStorage", "Audio"];
 
 let previous = null;
 
@@ -23,6 +23,7 @@ export function installDom() {
   globalThis.KeyboardEvent = dom.window.KeyboardEvent;
   globalThis.MouseEvent = dom.window.MouseEvent;
   globalThis.localStorage = dom.window.localStorage;
+  globalThis.Audio = dom.window.Audio;
   return dom;
 }
 

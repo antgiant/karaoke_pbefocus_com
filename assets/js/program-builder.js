@@ -1,5 +1,5 @@
 import { alignWordsToCanonical, canonicalWords, orderedSections, passageLabel, pickRecording, sectionKey } from "./library.js";
-import { getRuns, getTakeRank } from "./mix.js";
+import { getRuns, parsePaintId } from "./mix.js";
 
 /**
  * Flattens a selection + genre mix into an ordered playback program: one
@@ -53,14 +53,22 @@ export function buildProgram(manifest, mix, selectedKeys, verseFilter) {
 
     // Alignment (word object -> canonical index doesn't apply here; this is
     // canonical index -> that recording's word, or null) computed once per
-    // style actually needed for this section, reused across every run/word
-    // that wants it instead of recomputing per run.
-    const alignmentCache = new Map(); // styleId -> { recording, aligned } | null
-    function alignmentFor(styleId) {
-      if (alignmentCache.has(styleId)) return alignmentCache.get(styleId);
-      const recording = pickRecording(section, styleId, getTakeRank(mix, key, styleId));
+    // paint id (style + take, see mix.js) actually needed for this section,
+    // reused across every run/word that wants it instead of recomputing per
+    // run. alignedByRecording is a second index into the same results, keyed
+    // by the actual recording resolved -- needed below because a segment's
+    // *requested* paint id (e.g. a plain styleId, rank 0) isn't necessarily
+    // what re-deriving alignmentFor(seg.styleId) would resolve to once
+    // seg.styleId has been normalized back to a real style id.
+    const alignmentCache = new Map(); // paintId -> { recording, aligned } | null
+    const alignedByRecording = new Map(); // recording -> aligned[]
+    function alignmentFor(paintId) {
+      if (alignmentCache.has(paintId)) return alignmentCache.get(paintId);
+      const { styleId, takeRank } = parsePaintId(paintId);
+      const recording = pickRecording(section, styleId, takeRank);
       const result = recording ? { recording, aligned: alignWordsToCanonical(canonical, recording.words) } : null;
-      alignmentCache.set(styleId, result);
+      alignmentCache.set(paintId, result);
+      if (result) alignedByRecording.set(recording, result.aligned);
       return result;
     }
 
@@ -71,23 +79,26 @@ export function buildProgram(manifest, mix, selectedKeys, verseFilter) {
     // One resolved source per canonical index: which recording actually
     // supplies audio for that word, and why it differs from the request
     // (if it does). null means excluded (verse filter) or truly
-    // unavailable anywhere (rare).
+    // unavailable anywhere (rare). `styleId` on each entry is always a real
+    // manifest style id (never a paint id with a take suffix) -- the actual
+    // take used is implicit in which `recording` got resolved.
     const plan = canonical.map((cw, i) => {
       if (verseSet !== null && !verseSet.has(cw.verse)) return null;
 
       const run = runs.find((r) => i >= r.startIndex && i <= r.endIndex);
-      const requestedStyle = run ? run.styleId : mix.defaultStyleId;
-      const requested = alignmentFor(requestedStyle);
+      const requestedPaintId = run ? run.styleId : mix.defaultStyleId;
+      const requestedStyleId = parsePaintId(requestedPaintId).styleId;
+      const requested = alignmentFor(requestedPaintId);
       const requestedWord = requested?.aligned[i];
       if (requestedWord) {
-        return { styleId: requestedStyle, recording: requested.recording, word: requestedWord };
+        return { styleId: requested.recording.style, recording: requested.recording, word: requestedWord };
       }
 
       const reason = requested ? "alignment-gap" : "style-unavailable";
       if (fallback?.aligned[i]) {
-        return { styleId: fallback.recording.style, recording: fallback.recording, word: fallback.aligned[i], fallbackFrom: requestedStyle, reason };
+        return { styleId: fallback.recording.style, recording: fallback.recording, word: fallback.aligned[i], fallbackFrom: requestedStyleId, reason };
       }
-      return { unavailable: true, fallbackFrom: requestedStyle, reason: "no-aligned-audio" };
+      return { unavailable: true, fallbackFrom: requestedStyleId, reason: "no-aligned-audio" };
     });
 
     // Which verse(s) a canonical index range spans, for readable fallback labels --
@@ -154,9 +165,11 @@ export function buildProgram(manifest, mix, selectedKeys, verseFilter) {
     const multiPart = segments.length > 1;
     segments.forEach((seg, segIndex) => {
       const { recording, styleId } = seg;
-      // styleId always equals recording.style here (plan entries are only ever
-      // built from alignmentFor(styleId)'s own recording), so this is always a cache hit.
-      const aligned = alignmentFor(styleId).aligned;
+      // Looked up by the actual recording (not re-derived from styleId,
+      // which is always the plain/rank-0 style id here and could resolve to
+      // a *different* take than the one this segment actually plays) -- see
+      // the alignedByRecording comment above.
+      const aligned = alignedByRecording.get(recording);
       const slice = aligned.slice(seg.startIndex, seg.endIndex + 1).filter(Boolean);
       if (slice.length === 0) return;
 

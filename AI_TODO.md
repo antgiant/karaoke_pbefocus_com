@@ -28,74 +28,6 @@ there's no *actual* prior-version data to protect here either.)
 
 ---
 
-## 1. [ ] Improve the alternate-takes UI (both the default style and the custom genre mix)
-
-**Goal:** the existing take-selection controls work (see AI_TODO.md's prior
-"Create interface to allow access to alternate takes" item, now done and
-removed from this file) but are rough -- make them genuinely pleasant to
-use, not just functional. No specific redesign has been decided yet; this
-item is scoped as "go improve this," not "implement design X."
-
-**Current state (verified against code):**
-- Main style selector (`index.html`'s `#defaultTakeRow`, wired in
-  `main.js`): a single binary checkbox, "Prefer alternate take (where one
-  exists)," next to the default style `<select>`. It only ever toggles
-  `mix.defaultTakeRank` between `0` and `1` (`setDefaultTakeRank` in
-  `mix.js`) -- there's no way to reach a 3rd+ take from here at all, even
-  for a style/passage combo that has one.
-- Mix editor (`assets/js/mix-editor.js`'s `renderTakeControls()`, per
-  section): one control per (section, style-actually-painted) pair, shown
-  under that section's heading -- a checkbox ("`<style>`: alternate take")
-  for the common 2-take case, or a `<select>` ("Take 1"/"Take 2"/...) for
-  3+. This part already scopes correctly per section (confirmed -- each
-  section's `<details>` gets its own `renderTakeControls()` call, so two
-  sections using the same style don't share or collide on one control).
-- Neither surface gives the Pathfinder any way to tell takes apart before
-  picking one -- no duration, no preview, no label beyond an arbitrary
-  ordinal ("Take 2"). They're differentiated only by whatever recording
-  happened to sort into that position (`listTakes()` in `library.js`).
-- The two surfaces use different interaction models for the same concept:
-  the main selector is a single blanket on/off toggle; the mix editor is a
-  per-section-and-style control that's a checkbox in some cases and a
-  dropdown in others depending on take count. A Pathfinder using both has
-  to learn two different mental models for "which take."
-
-**Decided (confirmed with the user):**
-- **Core redesign: treat each take as its own paintable style**, not a
-  separate take-selector control layered on top of style painting. Since
-  most style/passage combos only ever have two takes, the Pathfinder's
-  mental model should be "paint Take 1 vs Take 2 the same way you paint
-  Country vs Pop" rather than learning a second, parallel UI (today's
-  checkbox-or-dropdown `takeOverrides`) just for take choice. This is a
-  bigger change than it sounds: it folds take selection into the existing
-  style-painting model instead of keeping it as a separate axis
-  (`mix.defaultTakeRank`/`mix.takeOverrides`), so it needs real scoping
-  before implementation -- e.g. the style palette (today one entry per
-  manifest style) would need take-variant entries exposed alongside each
-  style wherever more than one take exists, and `mix.sections`' per-word
-  style-id array (or a replacement of it) would need to encode take
-  alongside style. Whoever picks this up should design the concrete data-
-  model change (probably via a fresh look at `mix.js`'s `createMix`/
-  `paintRange`/`getRuns` and `mix-editor.js`'s style palette rendering)
-  rather than bolting this onto the existing take-rank fields.
-- **Also include**, regardless of how the above lands: an audio preview so
-  a Pathfinder can hear a take before picking it (rather than choosing
-  blind based on an arbitrary ordinal); a clearer visual indicator of which
-  take is currently in effect for a given section/style; and take count
-  surfaced in the main style selector's `<option>` text so a Pathfinder
-  knows before drilling in whether a style has alternates worth exploring.
-- Explicitly **not** pursuing a "keep the current checkbox/dropdown model
-  but make it always a dropdown" fix -- the take-as-style-variant redesign
-  above supersedes that direction.
-
-**Relevant files:** `index.html`'s `#defaultTakeRow`/`#styleSelect`,
-`assets/js/main.js` (the checkbox's wiring, `renderStyleOptions`),
-`assets/js/mix-editor.js`'s `renderTakeControls()`, `assets/js/mix.js`
-(`getTakeRank`/`setTakeRank`/`setDefaultTakeRank`), `assets/css/styles.css`
-(`.mix-take-control` and friends).
-
----
-
 ## 3. [ ] Sleep Mode: typing-effect word reveal, two-line dim/active display, drop line-nav buttons
 
 **Goal:** redesign Sleep Mode's word display so that: (a) words appear with
@@ -182,18 +114,20 @@ order and what "song" means here.
   `makeSource()`) -- any rate/pitch change has to be applied to both
   elements of a pair identically, and shouldn't fight the existing
   `resyncIfDrifted()` stem-drift guard.
-- A "library-level default + song-level override" pattern already exists
-  and is the natural template to follow: take selection's
-  `mix.defaultTakeRank` (global) plus `mix.takeOverrides[sectionKey][styleId]`
-  (per-song), read together via the `mix.takeOverrides?.[sectionKeyStr]?.[styleId]
-  ?? mix.defaultTakeRank ?? 0` fallback chain in `getTakeRank()`
-  (`mix.js:23-24`). "Song" in this app maps to a *section* (a
-  passage/chapter, which can itself span multiple styles/takes via
-  Customize Genre Mix), not a single recording -- so a per-section override
-  keyed like `mix.takeOverrides` is likely the right granularity, not
-  per-recording. By contrast, `playlist.studyOptions`
-  (`defaultStudyOptions()` in `playlists.js`) is playlist-wide only with no
-  per-section override today -- a weaker precedent for this specific ask.
+- Take selection used to be a "library-level default + song-level override"
+  pattern (`mix.defaultTakeRank`/`mix.takeOverrides`/`getTakeRank()`) that
+  would have been the natural template to follow here -- but AI_TODO.md's
+  former item 1 (now done) replaced it entirely: a take is now just another
+  paintable style variant baked directly into `mix.sections`' per-word
+  paint-id array (see `mix.js`'s `makePaintId`/`parsePaintId`), with no
+  separate default/override fields left to mirror. `playlist.studyOptions`
+  (`defaultStudyOptions()` in `playlists.js`) is the closest remaining
+  precedent, but it's playlist-wide only with no per-section override
+  today -- a two-tier example, not the three-tier shape this item wants.
+  "Song" in this app maps to a *section* (a passage/chapter, which can
+  itself span multiple styles/takes via Customize Genre Mix), not a single
+  recording -- so a per-section override keyed by `sectionKey` is likely
+  the right granularity, not per-recording.
 - The shared transport bar (`mountPlayerControls` in `player-controls.js`)
   is used by every study mode and Sleep Mode -- worth deciding up front
   whether the new controls live near it (global to any mode) or are scoped
@@ -207,8 +141,8 @@ order and what "song" means here.
   HTMLMediaElement's native `playbackRate`/`preservesPitch` -- budget for
   this as a real audio-pipeline change, not a slider hookup.
 - **Song-level granularity:** one override per *section* (a whole
-  passage/chapter), matching `mix.takeOverrides[sectionKey]` -- not
-  finer-grained per style-run within a section.
+  passage/chapter), keyed by `sectionKey` the same way `mix.sections` is --
+  not finer-grained per style-run within a section.
 - **Library-level scope (three tiers, not two):** the setting resolves
   through an app-wide default, an optional per-playlist override on top of
   it, and the per-section override on top of that. The Pathfinder picks the
@@ -249,9 +183,7 @@ order and what "song" means here.
 pattern to follow, and wherever the new section should be inserted),
 `assets/js/playback-engine.js` (`makeSource()`, `slots` -- where
 `playbackRate`/pitch would need to be threaded through both elements of a
-pair), `assets/js/mix.js` (`getTakeRank`/`setTakeRank`/
-`setDefaultTakeRank` -- the default+override pattern to mirror),
-`assets/js/player-controls.js` (if controls should live in the shared
+pair), `assets/js/player-controls.js` (if controls should live in the shared
 transport bar), `assets/js/playlists.js` (`defaultStudyOptions()`, if this
 ends up playlist-scoped instead of mix-scoped).
 

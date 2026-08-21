@@ -1,6 +1,6 @@
 import { colorForStyle } from "./constants.js";
 import { canonicalWords, listTakes, orderedSections, passageLabel, sectionKey } from "./library.js";
-import { getTakeRank, paintRange, setTakeRank } from "./mix.js";
+import { makePaintId, maxTakeCount, paintRange, parsePaintId } from "./mix.js";
 import { churchFitDescription, churchFitEmoji } from "./style-fit.js";
 
 // Sections start expanded (immediately usable for painting); this tracks
@@ -9,6 +9,12 @@ import { churchFitDescription, churchFitEmoji } from "./style-fit.js";
 // change) so collapsing one while you keep painting doesn't re-expand it.
 const collapsedSections = new Set();
 
+// How long a take-preview clip plays before auto-stopping (AI_TODO.md item
+// 1's "hear a take before picking it" requirement) -- long enough to get a
+// feel for the recording's character, short enough to stay a quick compare
+// rather than a full listen.
+const PREVIEW_SECONDS = 6;
+
 /**
  * The genre "paint" UI: one word-chip strip per selected section (verse
  * numbers, chapter title, each verse its own line -- same Bible-style
@@ -16,6 +22,14 @@ const collapsedSections = new Set();
  * style, then either tap a single word or drag across a range to paint it
  * -- built on Pointer Events (not the HTML5 Drag-and-Drop API) so the exact
  * same code path drives mouse and touch.
+ *
+ * Takes are painted the same way as any other style (AI_TODO.md item 1) --
+ * a style with more than one take (anywhere in the currently-selected
+ * sections) gets one palette swatch per take rather than a separate
+ * take-selector control layered on top. Each section still gets its own
+ * small preview row so the Pathfinder can hear a take before painting it
+ * (mix.js's paint-id model doesn't carry audio, only which take a run
+ * requests -- previewing needs the section's actual recording).
  *
  * Touch note: chips call releasePointerCapture on pointerdown to opt out of
  * the browser's implicit touch capture, which otherwise pins all pointer
@@ -26,37 +40,71 @@ export function mountMixEditor(container, manifest, mix, selectedKeys, onChange)
   container.innerHTML = "";
   container.className = "mix-editor";
 
-  let activeStyleId = mix.defaultStyleId;
+  let activePaintId = mix.defaultStyleId; // mix.defaultStyleId is always rank 0 (a plain style id) -- see mix.js
   let dragging = false;
   let dragSectionKey = null;
   let dragStart = null;
   let dragEnd = null;
 
+  // One shared preview pair, reused for every take-preview button in every
+  // section -- only one preview should ever play at once.
+  const previewInstrumentalEl = new Audio();
+  const previewVocalEl = new Audio();
+  let previewStopTimer = null;
+
+  function stopPreview() {
+    previewInstrumentalEl.pause();
+    previewVocalEl.pause();
+    if (previewStopTimer !== null) clearTimeout(previewStopTimer);
+    previewStopTimer = null;
+  }
+
+  function playPreview(recording) {
+    stopPreview();
+    previewInstrumentalEl.src = recording.instrumentalUrl;
+    previewVocalEl.src = recording.vocalUrl;
+    const startTime = recording.words.find((w) => w.verse !== null)?.start ?? 0;
+    const startBoth = () => {
+      previewInstrumentalEl.currentTime = startTime;
+      previewVocalEl.currentTime = startTime;
+      previewInstrumentalEl.play().catch(() => {});
+      previewVocalEl.play().catch(() => {});
+    };
+    if (previewInstrumentalEl.readyState >= 1) startBoth();
+    else previewInstrumentalEl.addEventListener("loadedmetadata", startBoth, { once: true });
+    previewStopTimer = setTimeout(stopPreview, PREVIEW_SECONDS * 1000);
+  }
+
   const palette = document.createElement("div");
   palette.className = "style-palette";
-  const swatchButtons = new Map();
+  const swatchButtons = new Map(); // paintId -> button
   for (const style of manifest.styles) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "style-swatch";
-    btn.style.setProperty("--swatch-color", colorForStyle(style.id, manifest.styles));
-    // Richer than the main style <select>'s plain-text treatment (see
-    // AI_TODO.md item 7) since this is a real button, not a native
-    // <option> -- a title tooltip carries the full plain-language
-    // description, and the church-fit emoji gets its own badge rather than
-    // being folded into the text.
-    btn.title = churchFitDescription(style.churchFit);
-    btn.textContent = style.emoji ? `${style.emoji} ${style.label}` : style.label;
-    if (style.churchFit) {
-      const badge = document.createElement("span");
-      badge.className = "style-swatch-fit";
-      badge.textContent = churchFitEmoji(style.churchFit);
-      badge.setAttribute("aria-hidden", "true"); // decorative -- the same info is in the button's title
-      btn.appendChild(badge);
+    const takeCount = maxTakeCount(manifest, mix, style.id);
+    for (let rank = 0; rank < takeCount; rank++) {
+      const id = makePaintId(style.id, rank);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "style-swatch";
+      btn.style.setProperty("--swatch-color", colorForStyle(style.id, manifest.styles));
+      // Richer than the main style <select>'s plain-text treatment (see
+      // AI_TODO.md item 7) since this is a real button, not a native
+      // <option> -- a title tooltip carries the full plain-language
+      // description, and the church-fit emoji gets its own badge rather than
+      // being folded into the text.
+      btn.title = churchFitDescription(style.churchFit);
+      const label = style.emoji ? `${style.emoji} ${style.label}` : style.label;
+      btn.textContent = takeCount > 1 ? `${label} · Take ${rank + 1}` : label;
+      if (style.churchFit) {
+        const badge = document.createElement("span");
+        badge.className = "style-swatch-fit";
+        badge.textContent = churchFitEmoji(style.churchFit);
+        badge.setAttribute("aria-hidden", "true"); // decorative -- the same info is in the button's title
+        btn.appendChild(badge);
+      }
+      btn.addEventListener("click", () => setActivePaint(id));
+      swatchButtons.set(id, btn);
+      palette.appendChild(btn);
     }
-    btn.addEventListener("click", () => setActiveStyle(style.id));
-    swatchButtons.set(style.id, btn);
-    palette.appendChild(btn);
   }
   container.appendChild(palette);
 
@@ -69,11 +117,11 @@ export function mountMixEditor(container, manifest, mix, selectedKeys, onChange)
   sectionsEl.className = "mix-sections";
   container.appendChild(sectionsEl);
 
-  function setActiveStyle(styleId) {
-    activeStyleId = styleId;
-    for (const [id, btn] of swatchButtons) btn.classList.toggle("active", id === styleId);
+  function setActivePaint(id) {
+    activePaintId = id;
+    for (const [pid, btn] of swatchButtons) btn.classList.toggle("active", pid === id);
   }
-  setActiveStyle(activeStyleId);
+  setActivePaint(activePaintId);
 
   const sectionEls = new Map();
 
@@ -95,68 +143,58 @@ export function mountMixEditor(container, manifest, mix, selectedKeys, onChange)
     summary.textContent = passageLabel(section);
     wrap.appendChild(summary);
 
-    const takeControls = document.createElement("div");
-    takeControls.className = "mix-take-controls";
-    wrap.appendChild(takeControls);
+    const takePreview = document.createElement("div");
+    takePreview.className = "mix-take-preview";
+    wrap.appendChild(takePreview);
 
     /**
-     * One take control per style actually painted somewhere in this
-     * section (not every style in the manifest -- only ones relevant to
-     * what's currently here), each addressing that specific (section,
-     * style) pair -- see AI_TODO.md item 6. A style with only one take has
-     * nothing to choose, so it gets no control at all; exactly two takes
-     * (the common case -- see build_manifest.py/AI_TODO.md's own count)
-     * gets a plain checkbox toggle; three or more gets a <select> so a
-     * rarer extra take isn't silently unreachable.
+     * One "🔊 Preview: [Take 1] [Take 2] ..." row per style actually
+     * painted somewhere in this section that has more than one take here
+     * (not every style in the manifest -- only ones relevant to what's
+     * currently here, and only for the styles/sections where there's
+     * actually a choice to make). Lets the Pathfinder hear each candidate
+     * take before painting it, rather than choosing blind off an arbitrary
+     * ordinal (AI_TODO.md item 1).
      */
-    function renderTakeControls() {
-      takeControls.innerHTML = "";
-      const stylesInUse = [...new Set(assignment)];
+    function renderTakePreview() {
+      takePreview.innerHTML = "";
+      const stylesInUse = [...new Set(assignment.map((id) => parsePaintId(id).styleId))];
       for (const styleId of stylesInUse) {
         const takes = listTakes(section, styleId);
         if (takes.length < 2) continue;
 
         const styleLabel = manifest.styles.find((s) => s.id === styleId)?.label ?? styleId;
-        const rank = getTakeRank(mix, key, styleId);
-
-        if (takes.length === 2) {
-          const label = document.createElement("label");
-          label.className = "inline-checkbox mix-take-control";
-          const checkbox = document.createElement("input");
-          checkbox.type = "checkbox";
-          checkbox.checked = rank >= 1;
-          checkbox.addEventListener("change", () => {
-            setTakeRank(mix, key, styleId, checkbox.checked ? 1 : 0);
-            onChange();
-          });
-          label.append(checkbox, ` ${styleLabel}: alternate take`);
-          takeControls.appendChild(label);
-        } else {
-          const label = document.createElement("label");
-          label.className = "mix-take-control";
-          label.textContent = `${styleLabel} take: `;
-          const select = document.createElement("select");
-          takes.forEach((recording, i) => {
-            const option = document.createElement("option");
-            option.value = String(i);
-            option.textContent = `Take ${i + 1}`;
-            select.appendChild(option);
-          });
-          select.value = String(Math.min(rank, takes.length - 1));
-          select.addEventListener("change", () => {
-            setTakeRank(mix, key, styleId, Number(select.value));
-            onChange();
-          });
-          label.appendChild(select);
-          takeControls.appendChild(label);
-        }
+        const row = document.createElement("div");
+        row.className = "mix-take-preview-row";
+        const label = document.createElement("span");
+        label.className = "mix-take-preview-label";
+        label.textContent = `🔊 ${styleLabel}:`;
+        row.appendChild(label);
+        takes.forEach((recording, i) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "btn tiny mix-take-preview-btn";
+          btn.textContent = `Take ${i + 1}`;
+          btn.addEventListener("click", () => playPreview(recording));
+          row.appendChild(btn);
+        });
+        takePreview.appendChild(row);
       }
     }
-    renderTakeControls();
+    renderTakePreview();
 
     const strip = document.createElement("div");
     strip.className = "word-strip";
     wrap.appendChild(strip);
+
+    /** Sets a chip's color/tooltip/take-badge from its current paint id -- shared by initial render and refresh() after a repaint. */
+    function applyChipStyle(chip, i) {
+      const { styleId, takeRank } = parsePaintId(assignment[i]);
+      chip.style.setProperty("--chip-color", colorForStyle(styleId, manifest.styles));
+      const label = manifest.styles.find((s) => s.id === styleId)?.label ?? styleId;
+      chip.title = takeRank > 0 ? `${label} — Take ${takeRank + 1}` : label;
+      chip.classList.toggle("word-chip-alt-take", takeRank > 0);
+    }
 
     const chips = [];
     let verseLine = null;
@@ -177,7 +215,7 @@ export function mountMixEditor(container, manifest, mix, selectedKeys, onChange)
       chip.className = "word-chip";
       chip.textContent = w.word;
       chip.dataset.index = String(i);
-      chip.style.setProperty("--chip-color", colorForStyle(assignment[i], manifest.styles));
+      applyChipStyle(chip, i);
 
       chip.addEventListener("pointerdown", (event) => {
         event.preventDefault();
@@ -210,8 +248,8 @@ export function mountMixEditor(container, manifest, mix, selectedKeys, onChange)
 
     sectionEls.set(key, {
       refresh: () => {
-        chips.forEach((chip, i) => chip.style.setProperty("--chip-color", colorForStyle(assignment[i], manifest.styles)));
-        renderTakeControls(); // a paint can introduce/remove which styles are in use, and so which take controls apply
+        chips.forEach((chip, i) => applyChipStyle(chip, i));
+        renderTakePreview(); // a paint can introduce/remove which styles (and their take counts) are in use here
       },
       clearSelection: () => chips.forEach((chip) => chip.classList.remove("selecting")),
     });
@@ -231,7 +269,7 @@ export function mountMixEditor(container, manifest, mix, selectedKeys, onChange)
 
   function commitDrag() {
     if (!dragging || dragSectionKey === null) return;
-    paintRange(mix, dragSectionKey, dragStart, dragEnd, activeStyleId);
+    paintRange(mix, dragSectionKey, dragStart, dragEnd, activePaintId);
     sectionEls.get(dragSectionKey)?.refresh();
     sectionEls.get(dragSectionKey)?.clearSelection();
     dragging = false;
@@ -254,6 +292,7 @@ export function mountMixEditor(container, manifest, mix, selectedKeys, onChange)
     unmount() {
       window.removeEventListener("pointerup", commitDrag);
       window.removeEventListener("pointercancel", cancelDrag);
+      stopPreview();
     },
   };
 }

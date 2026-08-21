@@ -77,20 +77,12 @@ export function serializePlaylistForShare(record, { includeManifestUrl = false, 
     const defaultStyleIndex = styleIndexFor(record.mix.defaultStyleId ?? null);
     const sections = {};
     for (const [key, assignment] of Object.entries(record.mix.sections ?? {})) {
+      // Entries here are paint ids (style + optional take, see mix.js) --
+      // opaque strings as far as the RLE dictionary is concerned, so no
+      // special handling needed beyond what style ids always got.
       sections[key] = runLengthEncode(assignment, styleIndexFor);
     }
-    // Take preferences (AI_TODO.md item 6) -- small, so no need for the
-    // same repetition-driven RLE treatment as the per-word style arrays,
-    // but still re-keyed against the local style dictionary rather than
-    // raw style ids, for the same reason: self-describing, independent of
-    // the manifest's own style ordering.
-    const takeOverrides = {};
-    for (const [key, byStyle] of Object.entries(record.mix.takeOverrides ?? {})) {
-      const reKeyed = {};
-      for (const [styleId, rank] of Object.entries(byStyle)) reKeyed[styleIndexFor(styleId)] = rank;
-      takeOverrides[key] = reKeyed;
-    }
-    mixOut = { defaultStyleIndex, sections, defaultTakeRank: record.mix.defaultTakeRank ?? 0, takeOverrides };
+    mixOut = { defaultStyleIndex, sections };
   }
 
   const payload = {
@@ -124,20 +116,9 @@ export function deserializePlaylistFromShare(payload) {
     for (const [key, runs] of Object.entries(payload.mix.sections ?? {})) {
       sections[key] = runLengthDecode(runs, dict);
     }
-    const takeOverrides = {};
-    for (const [key, byStyleIndex] of Object.entries(payload.mix.takeOverrides ?? {})) {
-      const reKeyed = {};
-      for (const [styleIndex, rank] of Object.entries(byStyleIndex)) {
-        const styleId = styleAt(Number(styleIndex));
-        if (styleId !== null) reKeyed[styleId] = rank;
-      }
-      takeOverrides[key] = reKeyed;
-    }
     mix = {
       defaultStyleId: styleAt(payload.mix.defaultStyleIndex),
-      defaultTakeRank: Number.isInteger(payload.mix.defaultTakeRank) ? payload.mix.defaultTakeRank : 0,
       sections,
-      takeOverrides,
     };
   }
 

@@ -1,4 +1,4 @@
-import { buildBookTree, formatDuration, formatVerseRanges } from "./library.js";
+import { buildBookTree, formatDuration, formatVerseRanges, maxTakeCountForStyle } from "./library.js";
 import { formatRelativeDate, lastAccuracy, lastAttempt, recordAttempt } from "./history.js";
 import { churchFitDescription, churchFitEmoji } from "./style-fit.js";
 import { initGate } from "./gate.js";
@@ -15,7 +15,7 @@ import {
   summarize,
   toggleKey,
 } from "./selection.js";
-import { createMix, fromSerializable, setDefaultStyle, setDefaultTakeRank, syncMixToSelection, toSerializable } from "./mix.js";
+import { createMix, fromSerializable, setDefaultStyle, syncMixToSelection, toSerializable } from "./mix.js";
 import { createPlaylistRecord, defaultStudyOptions, findPlaylist, renamePlaylist, duplicatePlaylist, deletePlaylist } from "./playlists.js";
 import {
   serializePlaylistForShare,
@@ -328,7 +328,13 @@ function renderStyleOptions(manifest, selectedStyleId) {
     // it's inert, not broken, on ones that don't -- the badge is the
     // reliable source either way).
     const vibe = style.emoji ? `${style.emoji} ` : "";
-    option.textContent = `${vibe}${style.label}`;
+    // Take count (AI_TODO.md item 1) -- lets a Pathfinder know before
+    // drilling into Customize Genre Mix whether this style even has
+    // alternate takes worth exploring there; picking a specific take only
+    // happens by painting it in the mix editor, not from this selector.
+    const takeCount = maxTakeCountForStyle(manifest, style.id);
+    const takeNote = takeCount > 1 ? ` (${takeCount} takes)` : "";
+    option.textContent = `${vibe}${style.label}${takeNote}`;
     if (style.churchFit) option.title = churchFitDescription(style.churchFit);
     select.appendChild(option);
   }
@@ -427,8 +433,6 @@ function initSelectionUi(manifest, manifestUrl) {
   }
 
   const styleSelect = renderStyleOptions(manifest, mix.defaultStyleId);
-  const defaultTakeCheckbox = document.getElementById("defaultTakeCheckbox");
-  defaultTakeCheckbox.checked = (mix.defaultTakeRank ?? 0) > 0;
   const mixEditorContainer = document.getElementById("mixEditor");
   const toggleMixEditorBtn = document.getElementById("toggleMixEditorBtn");
   let mixEditorHandle = null;
@@ -472,12 +476,6 @@ function initSelectionUi(manifest, manifestUrl) {
     renderMixEditorIfOpen();
   });
 
-  defaultTakeCheckbox.addEventListener("change", () => {
-    setDefaultTakeRank(mix, defaultTakeCheckbox.checked ? 1 : 0);
-    persistActivePlaylist();
-    renderMixEditorIfOpen(); // section-level take controls with no override of their own follow this default
-  });
-
   renderBookTree(manifest, selected, verseSelections, rerender, practiceHistory);
   renderSummary(selected, manifest, verseSelections);
 
@@ -502,7 +500,6 @@ function initSelectionUi(manifest, manifestUrl) {
     loadActivePlaylistIntoMemory();
     styleSelect.value = mix.defaultStyleId; // same manifest/style list across playlists -- just move the selection
     updateStyleFitBadge(manifest, mix.defaultStyleId);
-    defaultTakeCheckbox.checked = (mix.defaultTakeRank ?? 0) > 0;
     syncStudyOptionsFromActivePlaylist();
     renderPlaylistSelect();
     renderBookTree(manifest, selected, verseSelections, rerender, practiceHistory);
@@ -545,7 +542,6 @@ function initSelectionUi(manifest, manifestUrl) {
     loadActivePlaylistIntoMemory();
     styleSelect.value = mix.defaultStyleId;
     updateStyleFitBadge(manifest, mix.defaultStyleId);
-    defaultTakeCheckbox.checked = (mix.defaultTakeRank ?? 0) > 0;
     syncStudyOptionsFromActivePlaylist();
     renderPlaylistSelect();
     renderBookTree(manifest, selected, verseSelections, rerender, practiceHistory);

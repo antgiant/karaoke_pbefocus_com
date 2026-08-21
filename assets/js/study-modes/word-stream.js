@@ -1,6 +1,6 @@
 import { colorForStyle } from "../constants.js";
 import { canonicalWords, findSection, passageLabel } from "../library.js";
-import { getRuns } from "../mix.js";
+import { getRuns, parsePaintId } from "../mix.js";
 import { wordIndexAtTime } from "../playback-engine.js";
 import { stripTrailingVerseAnnouncement } from "./number-words.js";
 
@@ -140,7 +140,10 @@ export function createPassageView(container, engine, manifest, mix, verseFilter)
     if (runs.length <= 1) return null; // uniform style -- no tinting needed
     const colors = new Array(canonical.length).fill(null);
     for (const run of runs) {
-      for (let i = run.startIndex; i <= run.endIndex && i < colors.length; i++) colors[i] = run.styleId;
+      // run.styleId is actually a paint id (style + optional take, see
+      // mix.js) -- colorForStyle needs the real manifest style id.
+      const styleId = parsePaintId(run.styleId).styleId;
+      for (let i = run.startIndex; i <= run.endIndex && i < colors.length; i++) colors[i] = styleId;
     }
     return colors;
   }

@@ -1,46 +1,59 @@
-import { canonicalWords, findSection, orderedSections, sectionKey } from "./library.js";
+import { canonicalWords, findSection, listTakes, orderedSections, sectionKey } from "./library.js";
 
 /**
- * The genre-assignment model: for every selected section, an array of style
- * ids -- one per canonical (scripture) word -- recording which style plays
- * that word. Adjacent equal entries collapse into one playback block (see
+ * The genre-assignment model: for every selected section, an array of
+ * *paint ids* -- one per canonical (scripture) word -- recording which
+ * style (and, where a style has more than one take, which take) plays that
+ * word. Adjacent equal entries collapse into one playback block (see
  * getRuns/program-builder.js); painting is just overwriting a subrange of
  * this array, right down to a single index.
+ *
+ * A paint id is either a plain style id ("hiphop", meaning that style's
+ * first/lowest take) or "<styleId>::take<N>" for its Nth take (N >= 2) --
+ * see makePaintId/parsePaintId. This is AI_TODO.md item 1's redesign: a
+ * take is just another paintable brush alongside each style, not a
+ * separate take-selector control layered on top of style painting (the
+ * old mix.defaultTakeRank/mix.takeOverrides/getTakeRank/setTakeRank, now
+ * removed). mix.defaultStyleId itself is never a paint id with a take
+ * suffix -- it's always a plain style id, since it's just the uniform fill
+ * for newly-selected sections (see syncMixToSelection) and the last-resort
+ * fallback in program-builder.js, not something a Pathfinder paints
+ * directly.
  */
-export function createMix(defaultStyleId) {
-  return { defaultStyleId, defaultTakeRank: 0, sections: new Map(), takeOverrides: {} };
+const TAKE_MARK = "::take";
+
+/** Combines a style id + take rank (0 = first/lowest take) into one paintable id. Rank 0 collapses to the plain styleId (no suffix), so the common single-take case is indistinguishable from before this existed. */
+export function makePaintId(styleId, takeRank = 0) {
+  return takeRank > 0 ? `${styleId}${TAKE_MARK}${takeRank + 1}` : styleId;
+}
+
+/** The inverse of makePaintId -- splits a paint id back into {styleId, takeRank}. A plain styleId (no marker) is rank 0. */
+export function parsePaintId(paintId) {
+  const idx = paintId.lastIndexOf(TAKE_MARK);
+  if (idx === -1) return { styleId: paintId, takeRank: 0 };
+  const takeNumber = Number(paintId.slice(idx + TAKE_MARK.length));
+  return { styleId: paintId.slice(0, idx), takeRank: takeNumber - 1 };
 }
 
 /**
- * Which take (0 = lowest, 1 = next, ...) to use for a given section+style --
- * see AI_TODO.md item 6. An explicit per-(section, style) override (set via
- * the mix editor, same granularity as style painting) wins; otherwise falls
- * back to `mix.defaultTakeRank` (set via the main style selector's take
- * toggle, a blanket "prefer take N" Pathfinder preference applied wherever
- * there's no more specific override) which itself defaults to 0 -- today's
- * unchanged "always lowest take" behavior.
+ * Highest number of takes `styleId` has in any single section currently in
+ * the mix (i.e. currently selected) -- how many take-variant palette
+ * entries the mix editor should offer for this style. 1 (no variants,
+ * just the plain style) if it has no multi-take recording in any
+ * currently-selected section.
  */
-export function getTakeRank(mix, sectionKeyStr, styleId) {
-  return mix.takeOverrides?.[sectionKeyStr]?.[styleId] ?? mix.defaultTakeRank ?? 0;
-}
-
-/** Sets a per-(section, style) take override, or clears it (back to following mix.defaultTakeRank) if `rank` already matches the current default -- keeps the persisted shape from accumulating overrides that aren't actually doing anything. */
-export function setTakeRank(mix, sectionKeyStr, styleId, rank) {
-  if (!mix.takeOverrides) mix.takeOverrides = {};
-  if (rank === (mix.defaultTakeRank ?? 0)) {
-    if (mix.takeOverrides[sectionKeyStr]) {
-      delete mix.takeOverrides[sectionKeyStr][styleId];
-      if (Object.keys(mix.takeOverrides[sectionKeyStr]).length === 0) delete mix.takeOverrides[sectionKeyStr];
-    }
-    return;
+export function maxTakeCount(manifest, mix, styleId) {
+  let max = 1;
+  for (const key of mix.sections.keys()) {
+    const section = findSection(manifest, key);
+    if (!section) continue;
+    max = Math.max(max, listTakes(section, styleId).length);
   }
-  if (!mix.takeOverrides[sectionKeyStr]) mix.takeOverrides[sectionKeyStr] = {};
-  mix.takeOverrides[sectionKeyStr][styleId] = rank;
+  return max;
 }
 
-/** The blanket take-rank preference applied wherever there's no more specific per-(section, style) override -- see getTakeRank. */
-export function setDefaultTakeRank(mix, rank) {
-  mix.defaultTakeRank = rank;
+export function createMix(defaultStyleId) {
+  return { defaultStyleId, sections: new Map() };
 }
 
 /** Ensures every currently-selected section has an assignment array, sized to its canonical word count. */
@@ -72,15 +85,15 @@ export function setDefaultStyle(mix, newStyleId) {
   mix.defaultStyleId = newStyleId;
 }
 
-export function paintRange(mix, sectionKeyStr, startIndex, endIndexInclusive, styleId) {
+export function paintRange(mix, sectionKeyStr, startIndex, endIndexInclusive, paintId) {
   const assignment = mix.sections.get(sectionKeyStr);
   if (!assignment) return;
   const lo = Math.max(0, Math.min(startIndex, endIndexInclusive));
   const hi = Math.min(assignment.length - 1, Math.max(startIndex, endIndexInclusive));
-  for (let i = lo; i <= hi; i++) assignment[i] = styleId;
+  for (let i = lo; i <= hi; i++) assignment[i] = paintId;
 }
 
-/** Run-length-encodes a section's assignment into contiguous {styleId, startIndex, endIndex} blocks. */
+/** Run-length-encodes a section's assignment into contiguous {styleId, startIndex, endIndex} blocks. `styleId` here is actually a paint id (see the file-top comment) -- callers that need a real manifest style id (e.g. for color/label lookups) must decompose it via parsePaintId first. */
 export function getRuns(mix, sectionKeyStr) {
   const assignment = mix.sections.get(sectionKeyStr);
   if (!assignment || assignment.length === 0) return [];
@@ -98,9 +111,7 @@ export function getRuns(mix, sectionKeyStr) {
 export function toSerializable(mix) {
   return {
     defaultStyleId: mix.defaultStyleId,
-    defaultTakeRank: mix.defaultTakeRank ?? 0,
     sections: Object.fromEntries(mix.sections),
-    takeOverrides: mix.takeOverrides ?? {},
   };
 }
 
@@ -108,8 +119,6 @@ export function toSerializable(mix) {
  *  (a changed manifest could shift canonical word counts, and a stale-length array would misalign). */
 export function fromSerializable(saved, manifest) {
   const mix = createMix(saved?.defaultStyleId ?? manifest.styles[0]?.id ?? null);
-  mix.defaultTakeRank = Number.isInteger(saved?.defaultTakeRank) ? saved.defaultTakeRank : 0;
-  mix.takeOverrides = saved?.takeOverrides && typeof saved.takeOverrides === "object" ? saved.takeOverrides : {};
   if (!saved?.sections) return mix;
   for (const section of orderedSections(manifest)) {
     const key = sectionKey(section);

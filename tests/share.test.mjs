@@ -17,12 +17,10 @@ function makeRecord(overrides = {}) {
     activeStyle: "hiphop",
     mix: {
       defaultStyleId: "hiphop",
-      defaultTakeRank: 0,
       sections: {
         "Mark|1|null|null": ["hiphop", "hiphop", "hiphop", "polka", "polka"],
         "Mark|2|null|null": ["indiepop", "indiepop"],
       },
-      takeOverrides: {},
     },
     ...overrides,
   };
@@ -38,18 +36,15 @@ test("serializePlaylistForShare: run-length-encodes repetitive style runs instea
   assert.equal(totalWords, 5);
 });
 
-test("take preferences (AI_TODO.md item 6) round-trip through share/import, re-keyed against the local style dictionary", () => {
+test("a section painted with take-variant paint ids (AI_TODO.md item 1) round-trips through share/import like any other style id", () => {
   const record = makeRecord({
     mix: {
       defaultStyleId: "hiphop",
-      defaultTakeRank: 1,
-      sections: { "Mark|1|null|null": ["hiphop", "hiphop", "polka", "polka"] },
-      takeOverrides: { "Mark|1|null|null": { hiphop: 0, polka: 2 } },
+      sections: { "Mark|1|null|null": ["hiphop", "hiphop::take2", "polka", "polka::take3"] },
     },
   });
   const restored = deserializePlaylistFromShare(serializePlaylistForShare(record));
-  assert.equal(restored.mix.defaultTakeRank, 1);
-  assert.deepEqual(restored.mix.takeOverrides, { "Mark|1|null|null": { hiphop: 0, polka: 2 } });
+  assert.deepEqual(restored.mix.sections["Mark|1|null|null"], ["hiphop", "hiphop::take2", "polka", "polka::take3"]);
 });
 
 test("Karaoke Mode settings (studyOptions) round-trip through share/import", () => {

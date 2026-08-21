@@ -95,6 +95,15 @@ export function pickRecording(section, styleId, takeRank = 0) {
   return candidates[takeRank] ?? candidates[0];
 }
 
+/** Highest number of takes `styleId` has in any single section across the whole manifest -- lets the main style selector hint "N takes available" before a Pathfinder has selected anything or opened the mix editor (see AI_TODO.md item 1). 1 if it's never a multi-take style anywhere. */
+export function maxTakeCountForStyle(manifest, styleId) {
+  let max = 1;
+  for (const section of manifest.sections) {
+    max = Math.max(max, listTakes(section, styleId).length);
+  }
+  return max;
+}
+
 /**
  * The scripture words (verse != null) of whichever recording in this section
  * has the most of them, in order. This is the addressable "canonical word

@@ -955,33 +955,30 @@ dialog#shareDialog h2 {
   transform: rotate(90deg);
 }
 
-.mix-take-controls {
+.mix-take-preview {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
+  flex-direction: column;
+  gap: 0.35rem;
   padding: 0.5rem 0.85rem;
   background: #fff;
   border-bottom: 1px solid var(--line);
   font-size: 0.85rem;
 }
 
-.mix-take-controls:empty {
+.mix-take-preview:empty {
   display: none;
 }
 
-.mix-take-control {
-  display: inline-flex;
+.mix-take-preview-row {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.3rem;
-  font-weight: 700;
-  color: var(--teal-dark);
+  gap: 0.4rem;
 }
 
-.mix-take-control select {
-  padding: 0.2rem 0.4rem;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  font-size: 0.85rem;
+.mix-take-preview-label {
+  font-weight: 700;
+  color: var(--teal-dark);
 }
 
 .word-strip {
@@ -1022,6 +1019,13 @@ dialog#shareDialog h2 {
 .word-chip.selecting {
   outline: 2px solid var(--ink);
   outline-offset: 1px;
+}
+
+/* A word painted with a non-first take (AI_TODO.md item 1) -- a dashed
+   border distinguishes it from a same-colored first-take chip at a glance,
+   on top of the full "Style — Take N" text already in its title tooltip. */
+.word-chip.word-chip-alt-take {
+  border-style: dashed;
 }
 
 /* Sleep mode -- a deliberate, fixed night skin that does NOT follow the
