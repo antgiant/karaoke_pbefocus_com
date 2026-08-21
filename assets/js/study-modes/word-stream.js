@@ -82,6 +82,17 @@ export function buildLines(canonical, allowedVerses, wordsPerLine = WORDS_PER_LI
  * buttons) independent of playback -- doing so pauses the engine, so
  * browsing never fights what's actually playing. Resuming playback lets
  * the normal timeupdate-driven highlight() take back over on its own.
+ * Passing `hideNav: true` (Sleep Mode -- see AI_TODO.md item 3) omits these
+ * buttons entirely rather than just disabling them.
+ *
+ * `typing: true` (also Sleep Mode) swaps the windowing from
+ * current-line+next-line-preview to previous-line (dimmed, fully sung) +
+ * current-line, and renders the current line's words as individually
+ * fading-in letters timed to each word's actual start/end -- a typing
+ * effect locked to the audio rather than a fixed type-speed constant. Every
+ * word gets a per-letter span (built once, toggled via a "shown" class) so
+ * the line's full width is laid out immediately -- no reflow as letters
+ * reveal, only opacity changes.
  *
  * Each mode supplies renderWord()/onPastWord() to customize how a word
  * looks without needing to know any of this section/mix/seeking/windowing
@@ -90,7 +101,7 @@ export function buildLines(canonical, allowedVerses, wordsPerLine = WORDS_PER_LI
  * blackout-ramp) naturally end up with less to compute per call than they
  * did against a full passage.
  */
-export function createPassageView(container, engine, manifest, mix, verseFilter) {
+export function createPassageView(container, engine, manifest, mix, verseFilter, { typing = false, hideNav = false } = {}) {
   container.innerHTML = "";
   container.className = "karaoke-view";
   const heading = document.createElement("p");
@@ -114,7 +125,8 @@ export function createPassageView(container, engine, manifest, mix, verseFilter)
   nextBtn.textContent = "Next line ›";
   nextBtn.setAttribute("aria-label", "Next line (pauses playback)");
   nav.append(prevBtn, nextBtn);
-  container.append(heading, stream, nav);
+  container.append(heading, stream);
+  if (!hideNav) container.append(nav);
 
   let renderWordFn = (w) => ({ text: w.word });
   let onPastWordFn = null;
@@ -126,6 +138,7 @@ export function createPassageView(container, engine, manifest, mix, verseFilter)
   let lineOfIndex = new Map();
   let displayedLineIndex = null;
   let wordEls = []; // sparse, canonical.length-sized: only currently-rendered indices are non-null
+  let typingLetterEls = []; // sparse, canonical.length-sized, typing mode only: canonicalIndex -> that word's ordered per-letter spans
   let renderedIndices = []; // canonical indices in the current window (current + next line), for highlight()
   let location = []; // location[i] = {programIndex, time} | null, for click-to-seek
   let lastActiveIndex = -1;
@@ -167,8 +180,25 @@ export function createPassageView(container, engine, manifest, mix, verseFilter)
     const w = canonical[i];
     const { text, extraClass } = renderWordFn(w, i);
     const span = document.createElement("span");
-    span.className = "karaoke-word" + (extraClass ? ` ${extraClass}` : "");
-    span.textContent = `${text} `;
+    span.className = "karaoke-word" + (typing ? " typing-word" : "") + (extraClass ? ` ${extraClass}` : "");
+
+    if (typing) {
+      // Every letter (plus a trailing space, itself a "letter" so the
+      // typing effect finishes it too) is in the DOM from the start,
+      // opacity-hidden -- see the createPassageView doc comment for why
+      // this avoids reflow as letters reveal.
+      const letters = [];
+      for (const ch of `${text} `) {
+        const letterEl = document.createElement("span");
+        letterEl.className = "letter";
+        letterEl.textContent = ch;
+        span.appendChild(letterEl);
+        letters.push(letterEl);
+      }
+      typingLetterEls[i] = letters;
+    } else {
+      span.textContent = `${text} `;
+    }
 
     const loc = location[i];
     if (loc) {
@@ -238,13 +268,22 @@ export function createPassageView(container, engine, manifest, mix, verseFilter)
 
     const group = document.createElement("div");
     group.className = "karaoke-line-group";
-    group.append(
-      buildLineElement(clamped, "current-line"),
-      ...(clamped + 1 < lines.length ? [buildLineElement(clamped + 1, "next-line")] : [])
-    );
+    if (typing) {
+      group.append(
+        ...(clamped - 1 >= 0 ? [buildLineElement(clamped - 1, "previous-line")] : []),
+        buildLineElement(clamped, "current-line")
+      );
+    } else {
+      group.append(
+        buildLineElement(clamped, "current-line"),
+        ...(clamped + 1 < lines.length ? [buildLineElement(clamped + 1, "next-line")] : [])
+      );
+    }
 
     displayedLineIndex = clamped;
-    renderedIndices = [...lines[clamped].indices, ...(lines[clamped + 1]?.indices ?? [])];
+    renderedIndices = typing
+      ? [...(lines[clamped - 1]?.indices ?? []), ...lines[clamped].indices]
+      : [...lines[clamped].indices, ...(lines[clamped + 1]?.indices ?? [])];
     lastActiveIndex = -1; // force the next highlight() call to re-toggle .active/onPastWord on the new elements
 
     if (previousGroup) {
@@ -274,6 +313,7 @@ export function createPassageView(container, engine, manifest, mix, verseFilter)
     activeFillerBlock = null;
     fillerEls = [];
     wordEls = new Array(canonical.length).fill(null);
+    typingLetterEls = new Array(canonical.length).fill(null);
 
     const allowedVerses = verseFilter?.get(sectionKey) ?? null;
     const built = buildLines(canonical, allowedVerses);
@@ -350,10 +390,30 @@ export function createPassageView(container, engine, manifest, mix, verseFilter)
     for (const i of renderedIndices) {
       const isPast = i < canonicalIndex;
       wordEls[i].classList.toggle("active", i === canonicalIndex);
+      if (typing) {
+        // Snap fully shown (past/previous line) or fully hidden (current
+        // line, not reached yet) on every ci change -- the active word's
+        // letter-by-letter reveal is driven per-tick by updateTypingProgress
+        // below instead, so it's excluded here rather than being forced to
+        // "hidden" and immediately fought over by that call in the same tick.
+        if (i !== canonicalIndex) {
+          for (const letterEl of typingLetterEls[i]) letterEl.classList.toggle("shown", isPast);
+        }
+      }
       if (onPastWordFn) onPastWordFn(wordEls[i], isPast, i, canonical[i], canonicalIndex);
       else wordEls[i].classList.toggle("sung", isPast);
     }
     lastActiveIndex = canonicalIndex;
+  }
+
+  /** Typing mode only: reveals the currently-singing word's letters in proportion to elapsed time across its known start/end -- called every timeupdate tick (unlike highlight(), which short-circuits when the active index hasn't changed) so the reveal animates smoothly within one word, not just at word boundaries. */
+  function updateTypingProgress(canonicalIndex, word, t) {
+    const letters = typingLetterEls[canonicalIndex];
+    if (!letters) return;
+    const duration = Math.max(0.001, word.end - word.start);
+    const fraction = Math.min(1, Math.max(0, (t - word.start) / duration));
+    const shownCount = Math.round(fraction * letters.length);
+    letters.forEach((letterEl, idx) => letterEl.classList.toggle("shown", idx < shownCount));
   }
 
   prevBtn.addEventListener("click", () => {
@@ -377,8 +437,10 @@ export function createPassageView(container, engine, manifest, mix, verseFilter)
       if (block.sectionKey !== currentSectionKey) renderSection(block.sectionKey);
       updateFillerForBlock(block);
       const wordIdxInBlock = wordIndexAtTime(block.words, t);
-      const ci = wordIdxInBlock >= 0 ? (block.canonicalIndexMap.get(block.words[wordIdxInBlock]) ?? -1) : -1;
+      const word = wordIdxInBlock >= 0 ? block.words[wordIdxInBlock] : null;
+      const ci = word ? (block.canonicalIndexMap.get(word) ?? -1) : -1;
       highlight(ci);
+      if (typing && ci >= 0) updateTypingProgress(ci, word, t);
     }),
   ];
 

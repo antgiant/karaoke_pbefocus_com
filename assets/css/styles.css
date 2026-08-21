@@ -741,6 +741,36 @@ dialog#shareDialog h2 {
   opacity: 0.5;
 }
 
+/* Sleep Mode's typing display (AI_TODO.md item 3): mirror of .next-line --
+   the just-finished line dimmed, sitting above the current (full-opacity)
+   line being typed, instead of a preview of what's coming up next. */
+.karaoke-line.previous-line {
+  opacity: 0.5;
+}
+
+/* Typing mode (word-stream.js's `typing` option): every word is built from
+   individually-toggled letter spans, opacity-hidden until "shown" -- see
+   createPassageView's doc comment for why the whole word is in the DOM
+   (and thus already taking up its final width) from the start. */
+.karaoke-word.typing-word .letter {
+  opacity: 0;
+  transition: opacity 0.1s linear;
+}
+
+.karaoke-word.typing-word .letter.shown {
+  opacity: 1;
+}
+
+/* .sung's per-word dim (below) is what the non-typing modes use to mark
+   already-sung words within the *visible* line -- typing mode dims the
+   whole previous line instead (.previous-line above), so a sung word inside
+   the still-visible current line should stay full opacity/color, not dim
+   twice. */
+.karaoke-word.typing-word.sung {
+  color: inherit;
+  opacity: 1;
+}
+
 .karaoke-line-nav {
   display: flex;
   justify-content: space-between;
@@ -1141,6 +1171,11 @@ body.sleep-mode-active {
 .sleep-overlay .karaoke-word.sung {
   color: #5a4f38;
   opacity: 0.75;
+}
+
+.sleep-overlay .karaoke-word.typing-word.sung {
+  color: inherit;
+  opacity: 1;
 }
 
 .sleep-overlay .karaoke-word.active {

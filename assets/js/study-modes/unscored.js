@@ -36,7 +36,11 @@ const RAMP_STEP_PER_REPEAT = 0.2;
  * recall. See playback-engine.js's setVocalDuckPredicate.
  */
 export function mountUnscored(container, engine, manifest, mix, getOptions, verseFilter, onAttempt) {
-  const view = createPassageView(container, engine, manifest, mix, verseFilter);
+  // Read once, at mount time -- same rationale as duckVocals below: no UI
+  // path flips these mid-mount, only via "Start Studying" tearing down and
+  // remounting fresh.
+  const { typing = false, hideNav = false } = getOptions();
+  const view = createPassageView(container, engine, manifest, mix, verseFilter, { typing, hideNav });
   const playCounts = new Map();
   let revealed = new Set();
   let hinted = new Set();

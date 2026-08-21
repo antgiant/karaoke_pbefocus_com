@@ -6,8 +6,11 @@ import { mountPlayerControls } from "./player-controls.js";
 // same as what the old, now-retired karaoke.js did (see AI_TODO.md item 2).
 // Sleep Mode is for passive, hands-off listening, so it deliberately always
 // uses this regardless of whatever Karaoke Mode settings a Pathfinder has
-// picked for active study.
-const PLAIN_KARAOKE_OPTIONS = () => ({ blankFraction: 0 });
+// picked for active study. typing/hideNav (AI_TODO.md item 3) are also
+// Sleep-Mode-only: a typing-effect two-line display (previous line dimmed,
+// current line typed in) with no Previous/Next line buttons -- passive
+// hands-off viewing has no use for manual line stepping.
+const PLAIN_KARAOKE_OPTIONS = () => ({ blankFraction: 0, typing: true, hideNav: true });
 
 const SLEEP_TIMER_OPTIONS = [
   { value: "0", label: "No timer" },
