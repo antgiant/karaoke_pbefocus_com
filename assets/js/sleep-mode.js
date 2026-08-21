@@ -28,7 +28,13 @@ const FADE_SECONDS = 8;
  * MediaSession (lock-screen controls, so playback survives a locked
  * screen) on top. Returns an exit() function that tears everything down.
  */
-export function mountSleepMode(engine, program, manifest, mix, { styleLabelFor = (id) => id, verseFilter } = {}) {
+export function mountSleepMode(
+  engine,
+  program,
+  manifest,
+  mix,
+  { styleLabelFor = (id) => id, verseFilter, instrumentalVolume = 1, vocalVolume = 1, onVolumesChange } = {}
+) {
   const overlay = document.createElement("div");
   overlay.className = "sleep-overlay";
 
@@ -50,11 +56,47 @@ export function mountSleepMode(engine, program, manifest, mix, { styleLabelFor =
   shuffleCheckbox.type = "checkbox";
   shuffleLabel.append(shuffleCheckbox, document.createTextNode(" 🔀 Shuffle"));
 
+  // Independent instrumental/vocal volume sliders (AI_TODO.md item 2) --
+  // 0% just mutes the vocal <audio> element's volume rather than stopping
+  // it from loading (see the decided scope), so switching back up doesn't
+  // need to re-fetch anything. Persisted per playlist via onVolumesChange,
+  // same tier as the rest of Karaoke Mode's studyOptions.
+  function makeVolumeControl(labelText, initialPercent) {
+    const label = document.createElement("label");
+    label.className = "sleep-volume-control";
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.min = "0";
+    slider.max = "100";
+    slider.value = String(initialPercent);
+    label.append(`${labelText} `, slider);
+    return { label, slider };
+  }
+  const instrumentalControl = makeVolumeControl("🎹", Math.round(instrumentalVolume * 100));
+  const vocalControl = makeVolumeControl("🎤", Math.round(vocalVolume * 100));
+
+  function applyTrackVolumes() {
+    engine.setStemTrackVolumes({
+      instrumental: Number(instrumentalControl.slider.value) / 100,
+      vocal: Number(vocalControl.slider.value) / 100,
+    });
+  }
+  applyTrackVolumes();
+  for (const { slider } of [instrumentalControl, vocalControl]) {
+    slider.addEventListener("input", applyTrackVolumes);
+    slider.addEventListener("change", () => {
+      onVolumesChange?.({
+        instrumentalVolume: Number(instrumentalControl.slider.value) / 100,
+        vocalVolume: Number(vocalControl.slider.value) / 100,
+      });
+    });
+  }
+
   const exitBtn = document.createElement("button");
   exitBtn.type = "button";
   exitBtn.className = "btn secondary";
   exitBtn.textContent = "Exit Sleep Mode";
-  topbar.append(timerLabel, timerSelect, shuffleLabel, exitBtn);
+  topbar.append(timerLabel, timerSelect, shuffleLabel, instrumentalControl.label, vocalControl.label, exitBtn);
 
   const karaokeContainer = document.createElement("div");
   const controlsContainer = document.createElement("div");
@@ -154,6 +196,7 @@ export function mountSleepMode(engine, program, manifest, mix, { styleLabelFor =
     offEnded();
     engine.pause();
     engine.setMasterVolume(1);
+    engine.setStemTrackVolumes({ instrumental: 1, vocal: 1 }); // the engine is shared -- don't leave Sleep Mode's balance applied to whatever plays next
     unmountKaraoke();
     unmountControls();
     cleanupMediaSession();

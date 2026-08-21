@@ -783,7 +783,18 @@ function initSelectionUi(manifest, manifestUrl) {
     unmountPlayerControls = null;
     document.getElementById("karaokeView").innerHTML = "";
     document.getElementById("playerControls").innerHTML = "";
-    mountSleepMode(engine, program, manifest, mix, { styleLabelFor, verseFilter });
+    const record = findPlaylist(playlists, activePlaylistId);
+    const { instrumentalVolume = 1, vocalVolume = 1 } = record.studyOptions ?? defaultStudyOptions();
+    mountSleepMode(engine, program, manifest, mix, {
+      styleLabelFor,
+      verseFilter,
+      instrumentalVolume,
+      vocalVolume,
+      onVolumesChange: (volumes) => {
+        record.studyOptions = { ...(record.studyOptions ?? defaultStudyOptions()), ...volumes };
+        saveState({ schemaVersion: SCHEMA_VERSION, manifestUrl, playlists, activePlaylistId, history: practiceHistory });
+      },
+    });
   });
 }
 

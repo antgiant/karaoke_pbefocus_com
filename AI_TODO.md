@@ -96,57 +96,6 @@ item is scoped as "go improve this," not "implement design X."
 
 ---
 
-## 2. [ ] Sleep Mode: separate instrumental/vocal volume sliders
-
-**Goal:** add two independent volume sliders to Sleep Mode -- one for the
-instrumental track's level, one for the vocal track's level -- so a
-Pathfinder can turn the vocals down (or off) relative to the music while
-falling asleep, instead of only the single overall volume Sleep Mode has
-today.
-
-**Current state (verified against code, post stem-pipeline overhaul --
-every recording in the library is now a separated instrumental/vocal stem
-pair, see AGENTS.md):** `playback-engine.js` already always plays every
-block through a synced instrumental+vocal pair (`makeSource()`) -- there's
-no more single-track/dual-track branching, so Sleep Mode already gets a
-dual-track source for free, same as every other mode. `sleep-mode.js` reuses
-`mountUnscored` with a fixed `PLAIN_KARAOKE_OPTIONS = () =>
-({ blankFraction: 0 })` (`sleep-mode.js:10`) -- no `duckVocals` key, so it
-never sets a duck predicate, meaning the vocal element's `duckFactor` just
-stays at 1 (full volume) throughout, same as the instrumental. The engine's
-only existing volume control is `setMasterVolume(v)` (`playback-engine.js`)
--- one overall multiplier applied to *both* tracks together, used today for
-the sleep timer's fade-out (`sleep-mode.js:80,85,156`) -- there's no concept
-of two independently controllable tracks anywhere Sleep Mode touches.
-
-**What this needs:** a new engine API (e.g. something like
-`setStemTrackVolumes({ instrumental, vocal })`) for a flat, Pathfinder-set
-multiplier per track, independent of `setVocalDuckPredicate`'s per-word
-boolean (Karaoke Mode's "fade out the sung words when blanked" checkbox) --
-the source already separates `envelopeVolume` (the crossfade-driven volume,
-shared by both tracks) from `duckFactor` (the vocal-only multiplier), so
-this is a fairly direct extension: a second per-track multiplier that
-Sleep Mode's sliders drive directly, alongside (not replacing) the
-duck-predicate path Karaoke Mode uses. Since every recording now has stems,
-there's no longer a "what about a recording with no stems" question to
-resolve -- the sliders can just always be available.
-
-**Decided (confirmed with the user):**
-- The two sliders persist per playlist, alongside the rest of Karaoke
-  Mode's settings (`studyOptions`), same as `duckVocals` -- not a
-  session-only preference.
-- A 0% vocal slider just mutes the vocal `<audio>` element's volume; it
-  doesn't stop fetching/decoding the track. Simpler than conditional
-  loading, at the cost of some wasted bandwidth/battery over a full night.
-
-**Relevant files:** `assets/js/sleep-mode.js` (`PLAIN_KARAOKE_OPTIONS`,
-the volume/fade-out wiring), `assets/js/playback-engine.js`
-(`makeSource()`, `setVocalDuckPredicate`, `setMasterVolume`),
-`assets/js/playlists.js` (`defaultStudyOptions()`, if these end up
-persisted like `duckVocals`).
-
----
-
 ## 3. [ ] Sleep Mode: typing-effect word reveal, two-line dim/active display, drop line-nav buttons
 
 **Goal:** redesign Sleep Mode's word display so that: (a) words appear with

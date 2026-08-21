@@ -142,10 +142,18 @@ function makeSource() {
   let envelopeVolume = 0;
   let duckFactor = 1; // 1 = vocal at full volume, 0 = fully faded out
   let duckTarget = 1;
+  // Flat, Pathfinder-set per-track multipliers (Sleep Mode's instrumental/
+  // vocal volume sliders, AI_TODO.md item 2) -- independent of both
+  // envelopeVolume (the crossfade's own volume, shared by both tracks) and
+  // duckFactor (Karaoke Mode's per-word duck-predicate fade). Default 1
+  // (full volume) so a caller that never sets these hears the normal mix,
+  // same as before this existed.
+  let instrumentalTrackVolume = 1;
+  let vocalTrackVolume = 1;
 
   function applyVolumes() {
-    instrumentalEl.volume = envelopeVolume;
-    vocalEl.volume = envelopeVolume * duckFactor;
+    instrumentalEl.volume = envelopeVolume * instrumentalTrackVolume;
+    vocalEl.volume = envelopeVolume * duckFactor * vocalTrackVolume;
   }
 
   return {
@@ -208,6 +216,11 @@ function makeSource() {
       if (Math.abs(vocalEl.currentTime - instrumentalEl.currentTime) > STEM_RESYNC_DRIFT_SECONDS) {
         vocalEl.currentTime = instrumentalEl.currentTime;
       }
+    },
+    setTrackVolumes({ instrumental, vocal }) {
+      if (instrumental !== undefined) instrumentalTrackVolume = instrumental;
+      if (vocal !== undefined) vocalTrackVolume = vocal;
+      applyVolumes();
     },
   };
 }
@@ -439,6 +452,19 @@ export function createPlaybackEngine() {
 
     skipToPreviousBlock() {
       if (blockIndex > 0) playFromBlock(blockIndex - 1);
+    },
+
+    /**
+     * Flat per-track volume multipliers (0-1 each), independent of the
+     * crossfade envelope and any duck predicate -- Sleep Mode's
+     * instrumental/vocal sliders (AI_TODO.md item 2). Applies to both slots
+     * immediately (not just the currently-active one), so a block that's
+     * mid-preload in the standby slot -- or becomes active later via a
+     * crossfade -- already reflects it rather than only picking it up on
+     * its next explicit setVolume() call.
+     */
+    setStemTrackVolumes(opts) {
+      for (const slot of slots) slot.setTrackVolumes(opts);
     },
 
     /** External multiplier on top of the crossfade's own volume math -- e.g. sleep mode's fade-out. */

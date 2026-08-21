@@ -1079,6 +1079,19 @@ body.sleep-mode-active {
   cursor: pointer;
 }
 
+.sleep-volume-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.sleep-volume-control input[type="range"] {
+  width: 5rem;
+  accent-color: #e8d9b0;
+}
+
 .sleep-overlay .btn.secondary {
   border-color: #6b5a35;
   color: #e8d9b0;

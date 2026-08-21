@@ -33,6 +33,11 @@ export function defaultStudyOptions() {
     scored: false,
     scoredInput: null,
     duckVocals: false, // off by default -- a genuine "guess the words" recall mode, not what most Pathfinders expect out of the box
+    // Sleep Mode's independent instrumental/vocal volume sliders
+    // (AI_TODO.md item 2), 0-1 each. Both default to full volume -- the
+    // normal full-mix balance, same as before these sliders existed.
+    instrumentalVolume: 1,
+    vocalVolume: 1,
   };
 }
 
