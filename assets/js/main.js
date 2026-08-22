@@ -1,7 +1,7 @@
 import { buildBookTree, findSection, formatDuration, formatVerseRanges, maxTakeCountForStyle, passageLabel } from "./library.js";
 import { formatRelativeDate, lastAccuracy, lastAttempt, recordAttempt } from "./history.js";
 import { churchFitDescription, churchFitEmoji } from "./style-fit.js";
-import { initGate, isUploadIdentifier, isLocalIdentifier } from "./gate.js";
+import { initGate, isUploadIdentifier, isLocalIdentifier, isOneDriveShareLink } from "./gate.js";
 import { loadState, saveState, SCHEMA_VERSION } from "./storage.js";
 import { MANIFEST_URL_PARAM, PLAYLIST_URL_PARAM } from "./constants.js";
 import {
@@ -48,6 +48,7 @@ import {
   resolveUrlSync,
 } from "./offline/audio-cache.js";
 import { primeResolverCache as primeLocalResolverCache, resolveUrlSync as resolveLocalUrlSync } from "./offline/local-library.js";
+import { primeResolverCache as primeOneDriveResolverCache, resolveUrlSync as resolveOneDriveUrlSync } from "./offline/onedrive-library.js";
 
 // AI_TODO.md item 7 (offline support): registers the app-shell service
 // worker (assets/js/../../sw.js at the repo root, so its default scope
@@ -402,6 +403,13 @@ function initSelectionUi(manifest, manifestUrl) {
   // requests, and no offline cache to manage (the source *is* already
   // local), so both get skipped below wherever this is true.
   const isLocalLibrary = isLocalIdentifier(manifestUrl);
+  // A OneDrive-folder-link library (gate.js's isOneDriveShareLink) reads
+  // over the network via Graph, same as a hosted URL, but through its own
+  // resolver (offline/onedrive-library.js) that mints a signed download
+  // URL per recording and caches the bytes itself -- see the resolver
+  // wiring below for why it needs its own branch there, distinct from
+  // both the hosted and local-folder cases.
+  const isOneDriveLibrary = isOneDriveShareLink(manifestUrl);
   const playlists = sameLibrary && state.playlists.length ? state.playlists : [createPlaylistRecord("My Playlist")];
   let activePlaylistId =
     sameLibrary && findPlaylist(playlists, state.activePlaylistId) ? state.activePlaylistId : playlists[0].id;
@@ -795,11 +803,27 @@ function initSelectionUi(manifest, manifestUrl) {
   // cache a copy of, so opportunistic caching is skipped entirely for it.
   if (isLocalLibrary) {
     engine.setUrlResolver({ resolve: resolveLocalUrlSync, prime: primeLocalResolverCache });
+  } else if (isOneDriveLibrary) {
+    // Mints+caches each block's audio itself (offline/onedrive-library.js's
+    // primeResolverCache), unlike the plain hosted case below -- so the
+    // separate post-play cacheOpportunistically() call further down would
+    // be redundant (and wrong: instrumentalUrl/vocalUrl here are relative
+    // paths, not directly fetchable URLs) and is skipped for it too.
+    engine.setUrlResolver({ resolve: resolveOneDriveUrlSync, prime: primeOneDriveResolverCache });
   } else {
     engine.setUrlResolver({ resolve: resolveUrlSync, prime: primeResolverCache });
   }
   engine.on("blockchange", (block) => {
-    if (block && !isLocalLibrary) cacheOpportunistically(block.instrumentalUrl, block.vocalUrl).then(refreshOfflineUsage);
+    if (!block) return;
+    if (isLocalLibrary) return;
+    if (isOneDriveLibrary) {
+      // Caching itself already happened in primeOneDriveResolverCache
+      // (before this block started playing) -- just pick up whatever it
+      // added to the shared usage index the storage-usage UI reads.
+      refreshOfflineUsage();
+      return;
+    }
+    cacheOpportunistically(block.instrumentalUrl, block.vocalUrl).then(refreshOfflineUsage);
   });
 
   // Vibe emoji only here, not the full church-fit phrase (AI_TODO.md item

@@ -17,6 +17,13 @@ gate form, or picked up from a prior visit) or a local manifest file via the
 gate's "Upload Manifest File…" button (`assets/js/gate.js`'s
 `readManifestFile`) -- handy for testing against a manifest you haven't
 hosted anywhere yet, or for a Pathfinder who was handed the file directly.
+A OneDrive **folder** sharing link also works in that same URL box
+(`assets/js/offline/onedrive-library.js`) -- pasting one prompts a
+Microsoft sign-in (any free account; Graph has no zero-auth path even for
+an "anyone with the link" share) and then reads straight from that folder,
+same as picking a local one, just over the network -- see
+`PBE_2026_2027/AGENTS.md`'s "OneDrive folder-link library source" section
+for the design and the one-time Azure setup it needs.
 A URL-loaded manifest is remembered in `localStorage` for later visits, but
 always re-fetched (never cached), so pulling the manifest down revokes
 access; an uploaded manifest isn't remembered at all (there's nothing

@@ -11,8 +11,16 @@ import {
   readManifestFromHandle,
   setActiveRoot,
 } from "./offline/local-library.js";
+import {
+  isOneDriveShareLink,
+  signIn as signInToOneDrive,
+  resolveOneDriveFolder,
+  readManifestFromOneDrive,
+  setActiveRoot as setActiveOneDriveRoot,
+} from "./offline/onedrive-library.js";
 
 export { isLocalIdentifier } from "./offline/local-library.js";
+export { isOneDriveShareLink } from "./offline/onedrive-library.js";
 
 // AI_TODO.md item 7 (offline support): an uploaded manifest has no URL of
 // its own, so it's remembered under a synthetic identifier of this shape
@@ -205,6 +213,33 @@ export function initGate({ onUnlocked }) {
     }
   }
 
+  /**
+   * A OneDrive folder sharing link, pasted into the same box a hosted
+   * manifest URL goes in (see PBE_2026_2027/AGENTS.md's OneDrive
+   * writeup). Stored as the literal share URL in state, exactly like a
+   * plain hosted URL -- no synthetic identifier -- so this same function
+   * runs again unmodified on a reload/deep-link (`attempt()` below), and
+   * `main.js`'s "Share Library" dialog treats it as a real, re-shareable
+   * URL automatically.
+   */
+  async function attemptOneDrive(url) {
+    submitBtn.disabled = true;
+    showStatus("Signing in with Microsoft…");
+    try {
+      const token = await signInToOneDrive();
+      showStatus("Reading OneDrive folder…");
+      const root = await resolveOneDriveFolder(url, token, showStatus);
+      const manifest = await readManifestFromOneDrive(root, token, validateManifest, showStatus);
+      setActiveOneDriveRoot(root, token);
+      unlock(manifest, url);
+    } catch (e) {
+      if (e?.errorCode === "user_cancelled") clearMessages(); // MSAL's code for closing the sign-in popup -- treat like the local-folder picker's AbortError, not an error to show
+      else showError(e.message || "Could not load that OneDrive folder.");
+    } finally {
+      submitBtn.disabled = false;
+    }
+  }
+
   async function attempt(url) {
     if (!url) return;
     if (isUploadIdentifier(url)) {
@@ -213,6 +248,11 @@ export function initGate({ onUnlocked }) {
     }
     if (isLocalIdentifier(url)) {
       await attemptRememberedLocalFolder(url);
+      return;
+    }
+    if (isOneDriveShareLink(url)) {
+      input.value = url;
+      await attemptOneDrive(url);
       return;
     }
     input.value = url;

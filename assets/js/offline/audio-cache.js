@@ -124,28 +124,55 @@ function touch(kind, url, bytes) {
   saveIndex(index);
 }
 
-/** Fetches and stores one URL into `kind`'s cache if it isn't already there; always refreshes its lastUsed and the in-memory object-URL map either way. Throws on a genuine fetch failure -- callers decide whether that should be fatal (see downloadBlocksForOffline) or swallowed (see cacheOpportunistically). */
-async function storeOne(kind, url) {
-  if (!url) return;
+/**
+ * Fetches and stores `key` into `kind`'s cache if it isn't already there;
+ * always refreshes its lastUsed and the in-memory object-URL map either
+ * way. Throws on a genuine fetch failure -- callers decide whether that
+ * should be fatal (see downloadBlocksForOffline) or swallowed (see
+ * cacheOpportunistically).
+ *
+ * `key` and the URL actually fetched are separate on purpose: for a plain
+ * hosted recording they're the same string, but a OneDrive-sourced one
+ * (offline/onedrive-library.js) resolves to a short-lived signed download
+ * URL that's a different string every time it's re-minted, while `key` (a
+ * stable relative path) stays the same -- caching by the ephemeral URL
+ * would never hit across sessions. `getUrl` is only called on a cache
+ * miss (a plain string or a function returning one/a promise of one) so a
+ * cache hit costs nothing beyond a local lookup -- no network, no minting
+ * a fresh URL first just to throw it away.
+ */
+async function storeOne(kind, key, getUrl) {
+  if (!key) return;
   const cache = await caches.open(cacheNameFor(kind));
   const index = loadIndex();
-  let response = await cache.match(url);
+  let response = await cache.match(key);
   if (!response) {
+    const url = typeof getUrl === "function" ? await getUrl() : getUrl;
     const fetched = await fetch(url);
     if (!fetched.ok) throw new Error(`Failed to fetch ${url}: HTTP ${fetched.status}`);
-    await cache.put(url, fetched.clone());
+    await cache.put(key, fetched.clone());
     response = fetched;
   }
   const blob = await response.blob();
-  if (!objectUrlCache.has(url)) objectUrlCache.set(url, URL.createObjectURL(blob));
-  touch(kind, url, blob.size);
+  if (!objectUrlCache.has(key)) objectUrlCache.set(key, URL.createObjectURL(blob));
+  touch(kind, key, blob.size);
   if (kind === CACHE_KIND.OPPORTUNISTIC) await evictIfOverCap(kind);
+}
+
+/**
+ * Public, keyed version of storeOne -- for a source (like
+ * offline/onedrive-library.js) whose cache key and fetchable URL differ.
+ * See storeOne's comment for why. Rethrows on failure, same as storeOne;
+ * wrap in try/catch for opportunistic (never-fatal) use.
+ */
+export async function cacheKeyedUrl(kind, key, getUrl) {
+  await storeOne(kind, key, getUrl);
 }
 
 /** Best-effort: caches a block's instrumental+vocal pair into the opportunistic cache. Never throws -- a failed opportunistic cache attempt just means this recording stays remote-only for now, which must never break playback. */
 export async function cacheOpportunistically(instrumentalUrl, vocalUrl) {
   try {
-    await Promise.all([storeOne(CACHE_KIND.OPPORTUNISTIC, instrumentalUrl), storeOne(CACHE_KIND.OPPORTUNISTIC, vocalUrl)]);
+    await Promise.all([storeOne(CACHE_KIND.OPPORTUNISTIC, instrumentalUrl, instrumentalUrl), storeOne(CACHE_KIND.OPPORTUNISTIC, vocalUrl, vocalUrl)]);
   } catch {
     // best-effort, see above
   }
@@ -172,7 +199,10 @@ export async function downloadBlocksForOffline(blocks, onProgress) {
   let done = 0;
   onProgress?.(done, pairs.length);
   for (const block of pairs) {
-    await Promise.all([storeOne(CACHE_KIND.DOWNLOAD, block.instrumentalUrl), storeOne(CACHE_KIND.DOWNLOAD, block.vocalUrl)]);
+    await Promise.all([
+      storeOne(CACHE_KIND.DOWNLOAD, block.instrumentalUrl, block.instrumentalUrl),
+      storeOne(CACHE_KIND.DOWNLOAD, block.vocalUrl, block.vocalUrl),
+    ]);
     done += 1;
     onProgress?.(done, pairs.length);
   }

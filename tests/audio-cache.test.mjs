@@ -4,6 +4,7 @@ import { installDom, uninstallDom } from "./helpers/dom.mjs";
 import { installFakeCaches, uninstallFakeCaches, makeFetch } from "./helpers/fake-caches.mjs";
 import {
   CACHE_KIND,
+  cacheKeyedUrl,
   cacheOpportunistically,
   cacheUsage,
   clearCache,
@@ -69,6 +70,26 @@ test("cacheOpportunistically: a fetch failure never throws -- best-effort", asyn
   installFakeCaches({ fetchImpl });
   await assert.doesNotReject(cacheOpportunistically("https://host/bad.instrumental.m4a", "https://host/bad.vocal.m4a"));
   assert.equal(isCached(CACHE_KIND.OPPORTUNISTIC, "https://host/bad.instrumental.m4a"), false);
+});
+
+test("cacheKeyedUrl: caches by a stable key distinct from the fetched URL (the OneDrive case -- offline/onedrive-library.js), and a hit never calls getUrl again", async () => {
+  let mintCount = 0;
+  const getUrl = () => {
+    mintCount += 1;
+    return "https://cdn.example/ephemeral-download-1";
+  };
+  const fetchImpl = makeFetch({ "https://cdn.example/ephemeral-download-1": 800 });
+  installFakeCaches({ fetchImpl });
+
+  await cacheKeyedUrl(CACHE_KIND.OPPORTUNISTIC, "Style/Recording.instrumental.m4a", getUrl);
+  assert.equal(mintCount, 1);
+  assert.equal(isCached(CACHE_KIND.OPPORTUNISTIC, "Style/Recording.instrumental.m4a"), true);
+  assert.match(resolveUrlSync("Style/Recording.instrumental.m4a"), /^blob:/);
+
+  // A second call for the same key must be a pure cache hit: no re-fetch of a
+  // fresh (possibly differently-named) ephemeral URL, i.e. getUrl not called again.
+  await cacheKeyedUrl(CACHE_KIND.OPPORTUNISTIC, "Style/Recording.instrumental.m4a", getUrl);
+  assert.equal(mintCount, 1, "a cache hit must not call getUrl again");
 });
 
 test("downloadBlocksForOffline: dedupes repeated blocks and reports progress once per unique pair", async () => {
