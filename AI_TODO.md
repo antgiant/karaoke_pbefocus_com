@@ -81,48 +81,6 @@ no-bundled-content model this has to work around).
 
 ---
 
-## 8. [ ] Cross-passage review/drill mode
-
-**Goal:** once a Pathfinder has studied more than one passage, offer a mode
-that drills a shuffled mix across everything they've selected/studied (not
-just one playlist's passages in the order chosen), for long-term retention
-review.
-
-**Current state (verified against code):**
-- `program-builder.js`'s `buildProgram(manifest, mix, selectedKeys,
-  verseFilter)` already builds a playable program from an arbitrary set of
-  section keys plus a mix -- it isn't restricted to one playlist's own
-  selection, so the underlying "play any set of sections" mechanism already
-  exists.
-- Today every playlist is a self-contained unit -- its own
-  `selectedSectionKeys`, `mix`, `studyOptions` (`playlists.js`) -- there's
-  no existing concept of pulling sections from more than one playlist into
-  one study session, and no notion of "sections I've studied before" to
-  draw a review set from (this ties directly to item 5's practice-history
-  data, if that gets built).
-- `shuffleBySection` (`program-builder.js`) already exists and is reused by
-  Sleep Mode's shuffle toggle -- the same shuffling mechanism would likely
-  apply here.
-
-**Decided (confirmed with the user):**
-- **Let the Pathfinder choose the review-set source** rather than
-  hard-coding one -- offer both "every section across all playlists" and
-  "only sections with a logged practice history" (depends on item 5) as
-  options in this mode's own setup UI, not a single fixed behavior.
-- A section pulled in from outside the currently-active playlist uses
-  *that section's own playlist's mix* -- respects whatever genre-mix
-  customization the Pathfinder already did for it, rather than flattening
-  everything to the active playlist's default style.
-- This reuses the existing Karaoke Mode renderer, just pointed at a
-  cross-playlist program -- not a new standalone mode with its own UI.
-
-**Relevant files:** `assets/js/program-builder.js` (`buildProgram`,
-`shuffleBySection`), `assets/js/playlists.js` (playlist record shape --
-would need a way to enumerate sections across all playlists),
-`assets/js/selection.js`.
-
----
-
 ## 11. [ ] Port the "Rogue Sheep" easter egg from pbe-practice-engine
 
 **Goal:** bring over the "Rogue Sheep" whimsical easter egg from the
@@ -198,3 +156,59 @@ rules, `sheep-jump`/`sheep-jump-flipped` keyframes), `script.js:4096-6001`
 convention, `assets/js/main.js` (where it'd get wired up), `index.html`
 (new toggle markup), `assets/css/styles.css` (ported `.rogue-sheep*`
 rules).
+
+---
+
+## 12. [ ] Karaoke Mode silently renders blank when a section's first
+playable block starts well after 0:00
+
+**Goal:** fix a real, reproducible bug (found via browser-testing item 8's
+Review Mode, but independent of it -- reproduces on plain "Start Studying"
+too) where the karaoke word display stays permanently blank (empty
+heading, empty word stream, no error visible anywhere) for a section whose
+first *playable* block doesn't start at/near the recording's beginning.
+
+**Repro (verified against code and against the repo's own dev fixture,
+`scripts/dev-manifest.local.json`):**
+- Select **only** "1 John" chapter 1 (any playlist), click "Start
+  Studying" (unscored Karaoke Mode, default settings). Audio fetches
+  successfully (200s for both `.m4a` stems, confirmed via network
+  inspection) and starts playing, but `#karaokeView` never renders
+  anything -- no heading text, no word stream, indefinitely. No console
+  error, no `pageerror` event, nothing in `#fallbackNote` beyond the
+  normal "some words have no audio" note.
+- The same flow with "1 John" chapter 2 selected instead renders
+  correctly immediately.
+- The distinguishing factor (confirmed via a standalone
+  `buildProgram(manifest, mix, ["1 John|1||"])` run in Node, no browser):
+  1 John 1's *first* canonical words (verse 1's opening words) have no
+  audio in any style/take at all (`program.fallbacks` reports
+  `reason: "no-aligned-audio"` for `1 John 1:1`), so the section's first
+  actual playable block's `inTime` is well past 0:00 (~11s into the
+  recording) rather than at/near the start like most sections. 1 John 2
+  has no such leading gap.
+
+**Suspected root cause (not yet fixed, needs its own investigation):**
+- `playback-engine.js`'s `play()` (~line 672) calls
+  `playFromBlock(0, undefined, { applyCountIn: true })` -- an `async`
+  function -- without `await` or `.catch()`. If that promise rejects (the
+  likely culprit: `await source.seekAndPlay(time)` inside `playFromBlock`,
+  ~line 593, where `time` is a large nonzero offset instead of the ~0
+  every other section's first block normally has), the rejection is
+  silently swallowed. `emit("blockchange", ...)` (the only thing that
+  triggers `word-stream.js`'s `renderSection()`, which is what actually
+  fills in the heading/word stream) never runs, and nothing else surfaces
+  the failure -- `tick()`'s own `if (!block) return;` guard also fails
+  silently once `currentBlock()` never advances past `blockIndex === -1`.
+- Not yet confirmed *why* `seekAndPlay` itself would reject/hang for a
+  nonzero seek specifically -- needs tracing inside
+  `makeSource()`/`seekAndPlay()` (~`playback-engine.js:225` onward), not
+  just the unhandled-rejection symptom above.
+
+**Relevant files:** `assets/js/playback-engine.js` (`play()`,
+`playFromBlock()`, `makeSource()`/`seekAndPlay()`, `tick()`),
+`assets/js/study-modes/word-stream.js` (`renderSection()`, only ever
+triggered by the `blockchange` event this bug prevents from firing),
+`assets/js/program-builder.js` (where a block's `inTime` is computed from
+the first available word in its run -- confirms the nonzero-start
+condition, doesn't cause the bug itself).

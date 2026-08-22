@@ -27,7 +27,7 @@ import {
 } from "./share.js";
 import { renderQrCodeSvg } from "./qr.js";
 import { mountMixEditor } from "./mix-editor.js";
-import { buildProgram } from "./program-builder.js";
+import { buildProgram, shuffleBySection } from "./program-builder.js";
 import { createPlaybackEngine } from "./playback-engine.js";
 import { mountUnscored } from "./study-modes/unscored.js";
 import { mountTypeAhead } from "./study-modes/type-ahead.js";
@@ -711,6 +711,7 @@ function initSelectionUi(manifest, manifestUrl) {
   const scoredInputSelect = document.getElementById("scoredInputSelect");
   const ntpHelpSlider = document.getElementById("ntpHelpSlider");
   const ntpInputSelect = document.getElementById("ntpInputSelect");
+  const reviewSourceSelect = document.getElementById("reviewSourceSelect");
 
   // Slider and the "enter the percent directly" number input always show
   // the same value -- either one can drive it.
@@ -934,14 +935,17 @@ function initSelectionUi(manifest, manifestUrl) {
     clearLoopBtn: document.getElementById("clearLoopBtn"),
   });
 
-  document.getElementById("startKaraokeBtn").addEventListener("click", () => {
-    if (selected.size === 0) {
-      renderFallbackNote(manifest, []);
-      alert("Select at least one chapter or verse range first.");
-      return;
-    }
-    const verseFilter = buildVerseFilter(selected, verseSelections);
-    const program = buildProgram(manifest, mix, selected, verseFilter);
+  /**
+   * Shared tail end of both "Start Studying" and "Review Mode" -- everything
+   * from a built `program` onward (mode selection, engine wiring, player
+   * controls) is identical between them; only how `program`/`displayMix`/
+   * `verseFilter` get built up front differs (one playlist's own selection
+   * vs. a merged cross-playlist set, see the Review Mode handler below).
+   * `displayMix` only drives cosmetic per-word style tinting in the word
+   * stream (word-stream.js's colorsForSection) -- it's never used to pick
+   * actual audio, that's already baked into `program`'s blocks.
+   */
+  function launchKaraokeStudy(program, displayMix, verseFilter) {
     renderFallbackNote(manifest, program.fallbacks);
 
     unmountStudyView?.();
@@ -961,7 +965,7 @@ function initSelectionUi(manifest, manifestUrl) {
     engine.loadProgram(program);
 
     if (scoredCheckbox.checked) {
-      unmountStudyView = mountSingAlong(karaokeView, engine, manifest, mix, verseFilter, logAttempt);
+      unmountStudyView = mountSingAlong(karaokeView, engine, manifest, displayMix, verseFilter, logAttempt);
     } else {
       const getUnscoredOptions = () => ({
         blankFraction: Math.min(100, Math.max(0, Number(hintLevelInput.value) || 0)) / 100,
@@ -969,10 +973,73 @@ function initSelectionUi(manifest, manifestUrl) {
         lengthMatched: lengthMatchedCheckbox.checked,
         duckVocals: duckVocalsCheckbox.checked,
       });
-      unmountStudyView = mountUnscored(karaokeView, engine, manifest, mix, getUnscoredOptions, verseFilter, logAttempt);
+      unmountStudyView = mountUnscored(karaokeView, engine, manifest, displayMix, getUnscoredOptions, verseFilter, logAttempt);
     }
     unmountPlayerControls = mountPlayerControls(playerControls, engine, { styleLabelFor });
     engine.play();
+  }
+
+  document.getElementById("startKaraokeBtn").addEventListener("click", () => {
+    if (selected.size === 0) {
+      renderFallbackNote(manifest, []);
+      alert("Select at least one chapter or verse range first.");
+      return;
+    }
+    const verseFilter = buildVerseFilter(selected, verseSelections);
+    const program = buildProgram(manifest, mix, selected, verseFilter);
+    launchKaraokeStudy(program, mix, verseFilter);
+  });
+
+  /**
+   * Cross-passage review/drill (AI_TODO.md item 8): a shuffled Karaoke Mode
+   * program pulled from every playlist's own selection (or, narrowed by
+   * `reviewSourceSelect`, only sections with logged practice history), not
+   * just the active playlist. Each section keeps its own owning playlist's
+   * mix -- whatever genre customization the Pathfinder already did for it --
+   * rather than flattening everything to the active playlist's style.
+   *
+   * "Owning" playlist for a section = the first one (in playlists' stored
+   * order) that has it selected, so a section selected in more than one
+   * playlist is only included once, not duplicated per playlist.
+   */
+  document.getElementById("startReviewBtn").addEventListener("click", () => {
+    persistActivePlaylist(); // the active playlist's record needs to reflect any just-made changes before scanning across playlists
+
+    const onlyHistory = reviewSourceSelect.value === "history";
+    const claimed = new Set();
+    const blocks = [];
+    const fallbacks = [];
+    const displayMix = { defaultStyleId: mix.defaultStyleId, sections: new Map() };
+    const verseFilter = new Map();
+
+    for (const record of playlists) {
+      const keys = record.selectedSectionKeys.filter(
+        (k) => !claimed.has(k) && (!onlyHistory || (practiceHistory[k]?.length ?? 0) > 0)
+      );
+      if (keys.length === 0) continue;
+      keys.forEach((k) => claimed.add(k));
+
+      const recordMix = record.mix ? fromSerializable(record.mix, manifest) : createMix(record.activeStyle || manifest.styles[0].id);
+      const recordVerseFilter = buildVerseFilter(new Set(keys), createVerseSelections(record.verseSelections));
+      const recordProgram = buildProgram(manifest, recordMix, keys, recordVerseFilter);
+      blocks.push(...recordProgram.blocks);
+      fallbacks.push(...recordProgram.fallbacks);
+      for (const k of keys) {
+        displayMix.sections.set(k, recordMix.sections.get(k));
+        if (recordVerseFilter.has(k)) verseFilter.set(k, recordVerseFilter.get(k));
+      }
+    }
+
+    if (blocks.length === 0) {
+      alert(
+        onlyHistory
+          ? 'No passages with practice history yet — study something first, or switch to "Every selected passage."'
+          : "No passages selected in any playlist yet."
+      );
+      return;
+    }
+
+    launchKaraokeStudy(shuffleBySection({ blocks, fallbacks }), displayMix, verseFilter);
   });
 
   document.getElementById("sleepModeBtn").addEventListener("click", () => {

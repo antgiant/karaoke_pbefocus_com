@@ -184,6 +184,14 @@
             <button id="sleepModeBtn" type="button" class="btn secondary">🌙 Sleep Mode</button>
             <button id="startNameThatPassageBtn" type="button" class="btn secondary">🎧 Name that Passage</button>
           </div>
+          <div class="style-select-row">
+            <label for="reviewSourceSelect">🔀 Review Mode source</label>
+            <select id="reviewSourceSelect">
+              <option value="all">Every selected passage, all playlists</option>
+              <option value="history">Only passages I've practiced before</option>
+            </select>
+            <button id="startReviewBtn" type="button" class="btn secondary">Start Review Drill</button>
+          </div>
           <p id="fallbackNote" class="fallback-note" hidden></p>
           <div id="karaokeView"></div>
           <div id="playerControls"></div>
