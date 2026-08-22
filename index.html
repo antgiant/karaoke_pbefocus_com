@@ -47,13 +47,15 @@
           This karaoke study tool isn't public yet pending copyright clearance by the owners of
           NKJV (HarperCollins Christian Publishing). If you have a library link for your personal
           already cleared library, paste it below (or open this page with
-          <code>?library=&lt;url&gt;</code> already in the address) -- a OneDrive folder sharing
-          link works here too and will ask you to sign in with a Microsoft account.
+          <code>?library=&lt;url&gt;</code> already in the address) -- Supports local file library,
+          public web folder, and OneDrive folder sharing. (Note OneDrive sharing requires signing
+          in with a Microsoft account even when the link is open to everyone due to Microsoft
+          limitations.)
         </p>
         <form id="gateForm" class="gate-form">
-          <label for="gateUrlInput">Library manifest URL</label>
+          <label for="gateUrlInput">Library Manifest/Folder URL</label>
           <input id="gateUrlInput" type="url" name="library" placeholder="https://…/library.json" required />
-          <button id="gateSubmitBtn" type="submit" class="btn">Unlock Library</button>
+          <button id="gateSubmitBtn" type="submit" class="btn secondary">Load Manifest/Folder URL</button>
         </form>
         <p class="gate-divider">or</p>
         <div class="gate-alt-actions">
