@@ -377,6 +377,15 @@ export function createPlaybackEngine() {
   let masterVolume = 1; // external multiplier (e.g. sleep mode's fade-out), on top of crossfade's own volume math
   let duckPredicate = null; // (canonicalWordIndex) => boolean, or null -- see setVocalDuckPredicate
 
+  // AI_TODO.md item 7 (offline support) -- caller-supplied, mirroring
+  // setVocalDuckPredicate/setKaraokeControlsResolver's opt-in shape: see
+  // setUrlResolver below for what these do. Identity/no-op defaults so an
+  // engine nobody's wired this up for behaves exactly as it did before this
+  // feature existed.
+  let urlResolver = (url) => url;
+  let primeUrls = () => Promise.resolve();
+  let resolverReady = Promise.resolve();
+
   // AI_TODO.md item 4 (Karaoke Controls) -- caller-supplied, mirroring
   // setVocalDuckPredicate's opt-in shape: resolves a block's section to its
   // effective (already three-tier-resolved) pitch/rate/keyLock/countIn/
@@ -415,7 +424,7 @@ export function createPlaybackEngine() {
     const next = program.blocks[blockIndex + 1];
     if (!next) return;
     const source = standbySource();
-    source.setUrls(next.instrumentalUrl, next.vocalUrl);
+    source.setUrls(urlResolver(next.instrumentalUrl), urlResolver(next.vocalUrl));
     source.setVolume(0);
     source.load();
     applyControlsToSource(source, next.sectionKey);
@@ -534,8 +543,11 @@ export function createPlaybackEngine() {
 
   async function playFromBlock(index, seekTime, { applyCountIn = false } = {}) {
     if (index < 0 || index >= program.blocks.length) return;
+    await resolverReady; // AI_TODO.md item 7: let a fully-offline session's very first block resolve to its cached copy before racing playback against it -- see setUrlResolver
     cancelLoop();
     const block = program.blocks[index];
+    const resolvedInstrumentalUrl = urlResolver(block.instrumentalUrl);
+    const resolvedVocalUrl = urlResolver(block.vocalUrl);
 
     // If the standby slot already has this exact block loading/loaded (from
     // a prior preloadNext()), swap to it instead of starting a second,
@@ -543,7 +555,10 @@ export function createPlaybackEngine() {
     // reproducible against a plain dev server without Range support) never
     // resolve loadedmetadata for a second simultaneous request to an
     // identical URL, which would otherwise hang a manual skip forever.
-    const standbyMatches = standbySource().src === block.instrumentalUrl;
+    // Compared against the *resolved* URL -- preloadNext() also resolves
+    // before assigning src, so this must match on the same value or an
+    // offline-cached block would always (wrongly) look like a fresh source.
+    const standbyMatches = standbySource().src === resolvedInstrumentalUrl;
 
     let source;
     if (standbyMatches) {
@@ -553,7 +568,7 @@ export function createPlaybackEngine() {
     } else {
       for (const slot of slots) slot.pause();
       source = activeSource();
-      source.setUrls(block.instrumentalUrl, block.vocalUrl);
+      source.setUrls(resolvedInstrumentalUrl, resolvedVocalUrl);
     }
 
     // Applied to whichever source will actually play `block` -- must run
@@ -621,6 +636,28 @@ export function createPlaybackEngine() {
       // rather than carrying one over silently.
       loopRange = null;
       loopSeeking = false;
+      // AI_TODO.md item 7: kicked off here so it has the whole time between
+      // loadProgram() and the first playFromBlock() call to resolve --
+      // .catch keeps a priming failure from hanging playback forever, just
+      // falling back to whatever urlResolver returns for an unresolved URL.
+      resolverReady = Promise.resolve(primeUrls(newProgram.blocks)).catch(() => {});
+    },
+
+    /**
+     * Opt-in offline-cache hook (AI_TODO.md item 7), mirroring
+     * setVocalDuckPredicate/setKaraokeControlsResolver's shape:
+     * `resolve(url)` synchronously substitutes a locally-cached URL (e.g. a
+     * blob: object URL) for whatever setUrls would otherwise assign, and
+     * `prime(blocks)` is awaited once per loadProgram() call -- see
+     * resolverReady above -- so a fully-offline session's very first block
+     * can still resolve to its cached copy rather than racing playback
+     * against it. Pass nothing (the default) to leave every URL exactly as
+     * buildProgram gave it, i.e. no behavior change for a caller that never
+     * opts in.
+     */
+    setUrlResolver({ resolve, prime } = {}) {
+      urlResolver = resolve ?? ((url) => url);
+      primeUrls = prime ?? (() => Promise.resolve());
     },
 
     /**

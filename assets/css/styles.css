@@ -238,6 +238,25 @@ details.panel:not([open]) h2 {
   font-weight: 700;
 }
 
+.offline-usage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.offline-usage-row:last-of-type {
+  border-bottom: none;
+}
+
+.offline-status {
+  margin: 0.75rem 0 0;
+  color: var(--teal-dark);
+  font-weight: 700;
+}
+
 /* Buttons */
 
 .btn {

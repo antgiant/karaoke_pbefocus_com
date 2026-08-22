@@ -1,7 +1,7 @@
 import { buildBookTree, findSection, formatDuration, formatVerseRanges, maxTakeCountForStyle, passageLabel } from "./library.js";
 import { formatRelativeDate, lastAccuracy, lastAttempt, recordAttempt } from "./history.js";
 import { churchFitDescription, churchFitEmoji } from "./style-fit.js";
-import { initGate } from "./gate.js";
+import { initGate, isUploadIdentifier } from "./gate.js";
 import { loadState, saveState, SCHEMA_VERSION } from "./storage.js";
 import { MANIFEST_URL_PARAM, PLAYLIST_URL_PARAM } from "./constants.js";
 import {
@@ -37,6 +37,30 @@ import { mountSleepMode } from "./sleep-mode.js";
 import { mountPlayerControls } from "./player-controls.js";
 import { clampKaraokeControls, resolveKaraokeControls } from "./karaoke-controls.js";
 import { mountAbLoopPicker } from "./karaoke-controls-panel.js";
+import {
+  CACHE_KIND,
+  cacheOpportunistically,
+  cacheUsage,
+  clearCache,
+  downloadBlocksForOffline,
+  formatCacheUsage,
+  primeResolverCache,
+  resolveUrlSync,
+} from "./offline/audio-cache.js";
+
+// AI_TODO.md item 7 (offline support): registers the app-shell service
+// worker (assets/js/../../sw.js at the repo root, so its default scope
+// covers the whole app -- see that file) so a reload works without a
+// network connection. Registered with a plain relative path, resolved
+// against the page's own URL (not this module's), so it still works if the
+// app is ever deployed under a subpath. Best-effort: a browser with no
+// serviceWorker support, or a registration failure, just means no offline
+// app shell -- never fatal to the app itself.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  });
+}
 
 /** A shared-playlist payload -> a fresh playlist record (no id assigned by the payload; the importer always gets a new one, same as any other new playlist). */
 function recordFromSharedPayload(payload) {
@@ -364,11 +388,13 @@ function renderFallbackNote(manifest, fallbacks) {
 
 function initSelectionUi(manifest, manifestUrl) {
   const state = loadState();
-  // manifestUrl is null for a manifest loaded via the gate's upload button
-  // (see gate.js's initGate) rather than a URL -- an uploaded file has no
-  // stable identity to compare across visits, so it never counts as "the
-  // same library" as a remembered one, even if the remembered manifestUrl
-  // also happens to be null (e.g. two different uploads in a row).
+  // manifestUrl is a real URL for a URL-loaded manifest, or a synthetic
+  // `upload:<uuid>` identifier for one loaded via the gate's upload button
+  // (see gate.js's isUploadIdentifier) -- either way it's now stable across
+  // visits (AI_TODO.md item 7), so a repeat upload of the exact same
+  // remembered library (not a fresh upload, which always gets its own new
+  // uuid -- see gate.js's attemptUpload) counts as "the same library" here
+  // just like a repeat URL load does.
   const sameLibrary = manifestUrl !== null && state.manifestUrl === manifestUrl;
   const playlists = sameLibrary && state.playlists.length ? state.playlists : [createPlaylistRecord("My Playlist")];
   let activePlaylistId =
@@ -581,6 +607,12 @@ function initSelectionUi(manifest, manifestUrl) {
     persistActivePlaylist();
   });
 
+  // A synthetic `upload:<uuid>` manifestUrl (AI_TODO.md item 7 -- see
+  // gate.js's isUploadIdentifier) has no meaning to any other browser, so
+  // it's never something the share dialog can offer to bundle -- same
+  // "can't share this library" posture as the old always-null upload case.
+  const shareableManifestUrl = isUploadIdentifier(manifestUrl) ? null : manifestUrl;
+
   // --- Sharing: link/QR (tiered by payload size) or a downloadable file, with an explicit per-share privacy choice -- see AI_TODO.md item 5 ---
   const shareDialog = document.getElementById("shareDialog");
   const shareDialogPlaylistName = document.getElementById("shareDialogPlaylistName");
@@ -597,7 +629,7 @@ function initSelectionUi(manifest, manifestUrl) {
     const record = findPlaylist(playlists, activePlaylistId);
     return serializePlaylistForShare(record, {
       includeManifestUrl: shareIncludeLibraryCheckbox.checked,
-      manifestUrl,
+      manifestUrl: shareableManifestUrl,
     });
   }
 
@@ -618,7 +650,7 @@ function initSelectionUi(manifest, manifestUrl) {
 
     const url = new URL(window.location.href);
     url.search = "";
-    if (shareIncludeLibraryCheckbox.checked && manifestUrl) url.searchParams.set(MANIFEST_URL_PARAM, manifestUrl);
+    if (shareIncludeLibraryCheckbox.checked && shareableManifestUrl) url.searchParams.set(MANIFEST_URL_PARAM, shareableManifestUrl);
     url.searchParams.set(PLAYLIST_URL_PARAM, encodePlaylistPayload(payload));
     const link = url.toString();
     shareLinkInput.value = link;
@@ -629,10 +661,10 @@ function initSelectionUi(manifest, manifestUrl) {
     shareDialogPlaylistName.textContent = findPlaylist(playlists, activePlaylistId).name;
     shareIncludeLibraryCheckbox.checked = false;
     // A library loaded via the gate's upload button (see gate.js) has no
-    // URL to bundle into a share link -- disable rather than leave a
-    // checkbox that would silently do nothing when checked.
-    shareIncludeLibraryCheckbox.disabled = !manifestUrl;
-    shareIncludeLibraryCheckbox.title = manifestUrl
+    // shareable URL to bundle into a share link -- disable rather than
+    // leave a checkbox that would silently do nothing when checked.
+    shareIncludeLibraryCheckbox.disabled = !shareableManifestUrl;
+    shareIncludeLibraryCheckbox.title = shareableManifestUrl
       ? ""
       : "This library was loaded from an uploaded file, not a link, so there's no library link to include.";
     updateShareDialog();
@@ -686,7 +718,72 @@ function initSelectionUi(manifest, manifestUrl) {
     }
   });
 
+  // --- Offline storage management (AI_TODO.md item 7): usage + clear
+  // actions for both the opportunistic and explicit-download caches, plus
+  // the explicit "download this playlist" action itself. The opportunistic
+  // cache fills up on its own as the Pathfinder studies normally (see the
+  // engine.on("blockchange") hook below); this panel is only for seeing/
+  // managing what's accumulated and for the deliberate download. ---
+  const offlineOpportunisticUsageEl = document.getElementById("offlineOpportunisticUsage");
+  const offlineClearOpportunisticBtn = document.getElementById("offlineClearOpportunisticBtn");
+  const offlineDownloadUsageEl = document.getElementById("offlineDownloadUsage");
+  const offlineClearDownloadsBtn = document.getElementById("offlineClearDownloadsBtn");
+  const offlineDownloadPlaylistBtn = document.getElementById("offlineDownloadPlaylistBtn");
+  const offlineDownloadStatusEl = document.getElementById("offlineDownloadStatus");
+
+  function refreshOfflineUsage() {
+    offlineOpportunisticUsageEl.textContent = formatCacheUsage(cacheUsage(CACHE_KIND.OPPORTUNISTIC));
+    offlineDownloadUsageEl.textContent = formatCacheUsage(cacheUsage(CACHE_KIND.DOWNLOAD));
+  }
+  refreshOfflineUsage();
+
+  offlineClearOpportunisticBtn.addEventListener("click", async () => {
+    await clearCache(CACHE_KIND.OPPORTUNISTIC);
+    refreshOfflineUsage();
+  });
+
+  offlineClearDownloadsBtn.addEventListener("click", async () => {
+    if (!confirm("Delete every recording downloaded for offline use? You can download them again later.")) return;
+    await clearCache(CACHE_KIND.DOWNLOAD);
+    refreshOfflineUsage();
+  });
+
+  offlineDownloadPlaylistBtn.addEventListener("click", async () => {
+    if (selected.size === 0) {
+      alert("Select at least one chapter or verse range first.");
+      return;
+    }
+    const verseFilter = buildVerseFilter(selected, verseSelections);
+    const program = buildProgram(manifest, mix, selected, verseFilter);
+    offlineDownloadPlaylistBtn.disabled = true;
+    offlineDownloadStatusEl.hidden = false;
+    try {
+      await downloadBlocksForOffline(program.blocks, (done, total) => {
+        offlineDownloadStatusEl.textContent = total > 0 ? `Downloading… ${done} / ${total} recordings` : "Nothing to download.";
+      });
+      offlineDownloadStatusEl.textContent = "Download complete -- this playlist's current mix is now available offline.";
+    } catch (e) {
+      offlineDownloadStatusEl.textContent = `Download failed: ${e.message}`;
+    } finally {
+      offlineDownloadPlaylistBtn.disabled = false;
+      refreshOfflineUsage();
+    }
+  });
+
   const engine = createPlaybackEngine();
+
+  // AI_TODO.md item 7 (offline support): transparently serves a cached
+  // blob: URL in place of a block's remote instrumental/vocal URLs when
+  // one's available (setUrlResolver), and opportunistically caches
+  // whatever's actually playing in the background as blocks change --
+  // shared across every mode that drives this one engine instance (Karaoke
+  // Mode, Sleep Mode, Name that Passage), so this single wiring point
+  // covers all of them.
+  engine.setUrlResolver({ resolve: resolveUrlSync, prime: primeResolverCache });
+  engine.on("blockchange", (block) => {
+    if (block) cacheOpportunistically(block.instrumentalUrl, block.vocalUrl).then(refreshOfflineUsage);
+  });
+
   // Vibe emoji only here, not the full church-fit phrase (AI_TODO.md item
   // 7 -- lock-screen/scrubber space is limited, per its own caution).
   const styleLabelFor = (id) => {

@@ -28,59 +28,6 @@ there's no *actual* prior-version data to protect here either.)
 
 ---
 
-## 7. [ ] Offline / PWA support
-
-**Goal:** add a service worker + manifest.json so a playlist whose audio
-has already been fetched keeps working without a network connection --
-useful for Sleep Mode running overnight, or a club meeting with unreliable
-wifi.
-
-**Current state (verified against code):** No `manifest.json`, no service
-worker, and no `navigator.serviceWorker` reference anywhere in the repo
-(confirmed by search) -- this is entirely new infrastructure, not an
-extension of something partial.
-- The content-gating model (`gate.js`) is network-dependent by design: the
-  library manifest is "always re-fetched, never cached" (the gate's own
-  comment) from a URL outside this repo, and every recording's audio is
-  fetched from wherever the manifest points (also external, not bundled).
-  True offline support needs to cache both the manifest response and the
-  specific audio files a Pathfinder's playlists actually reference, not
-  just this app's own static assets.
-- Content is explicitly *not* shipped in this repo (see AGENTS.md/gate.js)
-  -- the manifest and audio are hosted separately and privately, so a
-  service worker here can only cache what it observes being fetched at
-  runtime, not pre-cache anything at install time.
-
-**Decided (confirmed with the user):**
-- **Both caching modes, not one or the other:** a size-capped opportunistic
-  cache (whatever's played during normal use stays available offline, up
-  to a storage limit) *and* an explicit "download this playlist for
-  offline" action for a deliberate, complete download. Both need their own
-  "clear this cache" action and a way to see how much space each is
-  currently using -- this is real storage-management UI, not just a
-  background service worker.
-- **Remember the manifest across reloads no matter how it was loaded** --
-  URL, pasted, or uploaded-file alike. This changes `gate.js`'s current
-  behavior beyond just this item's scope: today the uploaded-file path is
-  explicitly *not* remembered (`gate.js`'s own comment), and even the
-  URL-based manifest is "always re-fetched, never cached." Making the
-  manifest itself persist/cache is a prerequisite for offline support to
-  work for every load path, not an optional nice-to-have -- implementing
-  this item means revisiting that "always re-fetched" design decision in
-  `gate.js` directly, not just adding a service worker alongside it.
-- Every recording is a stem *pair* (instrumental + vocal, see AGENTS.md) --
-  both need caching together per block in either caching mode, or a
-  partially-cached pair breaks playback.
-
-**Relevant files:** `assets/js/gate.js` (`fetchManifest`, the "always
-re-fetched" comment, `manifestUrl` persistence), `assets/js/
-playback-engine.js` (`makeSource()`, where `instrumentalUrl`/`vocalUrl`
-get fetched), a new `manifest.json` + service-worker registration (no
-existing file to extend), `AGENTS.md` (confirms the private-hosting/
-no-bundled-content model this has to work around).
-
----
-
 ## 11. [ ] Port the "Rogue Sheep" easter egg from pbe-practice-engine
 
 **Goal:** bring over the "Rogue Sheep" whimsical easter egg from the

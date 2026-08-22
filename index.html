@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PBE Karaoke</title>
     <link rel="stylesheet" href="assets/css/styles.css" />
+    <link rel="manifest" href="manifest.json" />
+    <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
+    <meta name="theme-color" content="#0f6370" />
     <script type="module" src="assets/js/main.js" defer></script>
   </head>
   <body>
@@ -71,6 +74,28 @@
           </div>
           <p id="importPlaylistError" class="gate-error" role="alert" hidden></p>
         </section>
+
+        <details class="panel" id="offlinePanel">
+          <summary class="panel-summary"><h2>Offline / Downloads</h2></summary>
+          <p>
+            Recordings you actually play are cached automatically as you study, up to a storage
+            limit, so they keep working without a network connection. You can also download this
+            playlist's current mix on purpose, e.g. before Sleep Mode runs overnight or before a
+            club meeting with unreliable wifi.
+          </p>
+          <div class="offline-usage-row">
+            <span>Auto-cached from studying: <strong id="offlineOpportunisticUsage">Nothing cached yet</strong></span>
+            <button id="offlineClearOpportunisticBtn" type="button" class="btn secondary">Clear</button>
+          </div>
+          <div class="offline-usage-row">
+            <span>Downloaded for offline: <strong id="offlineDownloadUsage">Nothing cached yet</strong></span>
+            <button id="offlineClearDownloadsBtn" type="button" class="btn secondary">Clear</button>
+          </div>
+          <div class="style-select-row">
+            <button id="offlineDownloadPlaylistBtn" type="button" class="btn secondary">Download This Playlist for Offline</button>
+          </div>
+          <p id="offlineDownloadStatus" class="offline-status" role="status" aria-live="polite" hidden></p>
+        </details>
 
         <dialog id="shareDialog">
           <form method="dialog" class="share-dialog-form">

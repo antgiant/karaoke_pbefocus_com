@@ -1,0 +1,14 @@
+{
+  "name": "PBE Karaoke",
+  "short_name": "PBE Karaoke",
+  "description": "Scripture-song karaoke study app for memorizing Bible passages.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fbfaf5",
+  "theme_color": "#0f6370",
+  "icons": [
+    { "src": "assets/icon.svg", "sizes": "any", "purpose": "any" },
+    { "src": "assets/icon.svg", "sizes": "any", "purpose": "maskable" }
+  ]
+}
