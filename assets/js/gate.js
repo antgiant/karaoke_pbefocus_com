@@ -2,6 +2,17 @@ import { MANIFEST_URL_PARAM } from "./constants.js";
 import { validateManifest } from "./library.js";
 import { loadState, saveState } from "./storage.js";
 import { saveManifest, loadManifest, uploadCacheKey } from "./offline/manifest-cache.js";
+import {
+  isLocalIdentifier,
+  isFileSystemAccessSupported,
+  pickAndRememberFolder,
+  recallFolder,
+  reconnectFolder,
+  readManifestFromHandle,
+  setActiveRoot,
+} from "./offline/local-library.js";
+
+export { isLocalIdentifier } from "./offline/local-library.js";
 
 // AI_TODO.md item 7 (offline support): an uploaded manifest has no URL of
 // its own, so it's remembered under a synthetic identifier of this shape
@@ -102,9 +113,14 @@ export function initGate({ onUnlocked }) {
   const input = document.getElementById("gateUrlInput");
   const uploadBtn = document.getElementById("gateUploadBtn");
   const uploadInput = document.getElementById("gateUploadFile");
+  const localFolderBtn = document.getElementById("gateLocalFolderBtn");
   const errorEl = document.getElementById("gateError");
   const statusEl = document.getElementById("gateStatus");
   const submitBtn = document.getElementById("gateSubmitBtn");
+
+  // Chrome/Edge only (File System Access API) -- same progressive-
+  // enhancement posture as study-modes/sing-along.js's Web Speech check.
+  localFolderBtn.hidden = !isFileSystemAccessSupported();
 
   function showError(message) {
     errorEl.textContent = message;
@@ -146,10 +162,57 @@ export function initGate({ onUnlocked }) {
     }
   }
 
+  /** Auto-resume path for a `local:<uuid>` identifier restored from a prior visit (query string or storage) -- runs with no user gesture available, so it can only check whether permission is *already* granted, never prompt for it (see local-library.js's recallFolder). Falls through to asking for a click when it isn't. */
+  async function attemptRememberedLocalFolder(identifier) {
+    localFolderBtn.disabled = true;
+    showStatus("Loading local library folder…");
+    try {
+      const handle = await recallFolder(identifier);
+      if (!handle) {
+        showError('Reconnect your local library folder -- click "Load Local Folder…" below.');
+        return;
+      }
+      const manifest = await readManifestFromHandle(handle, validateManifest);
+      setActiveRoot(handle);
+      unlock(manifest, identifier);
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      localFolderBtn.disabled = false;
+    }
+  }
+
+  /** Click-triggered: re-requests permission on a previously-picked folder if one's remembered (no picker dialog needed), otherwise opens the native folder picker fresh. */
+  async function attemptLocalFolder() {
+    localFolderBtn.disabled = true;
+    showStatus("Choose your library folder…");
+    try {
+      const remembered = loadState().manifestUrl;
+      let handle = isLocalIdentifier(remembered) ? await reconnectFolder(remembered) : null;
+      let identifier = handle ? remembered : null;
+      if (!handle) {
+        ({ identifier, handle } = await pickAndRememberFolder());
+      }
+      showStatus("Reading manifest…");
+      const manifest = await readManifestFromHandle(handle, validateManifest);
+      setActiveRoot(handle);
+      unlock(manifest, identifier);
+    } catch (e) {
+      if (e?.name !== "AbortError") showError(e.message || "Could not load that folder.");
+      else clearMessages();
+    } finally {
+      localFolderBtn.disabled = false;
+    }
+  }
+
   async function attempt(url) {
     if (!url) return;
     if (isUploadIdentifier(url)) {
       await attemptRememberedUpload(url);
+      return;
+    }
+    if (isLocalIdentifier(url)) {
+      await attemptRememberedLocalFolder(url);
       return;
     }
     input.value = url;
@@ -192,6 +255,8 @@ export function initGate({ onUnlocked }) {
     uploadInput.value = ""; // so choosing the same file again still fires "change"
     attemptUpload(file);
   });
+
+  localFolderBtn.addEventListener("click", () => attemptLocalFolder());
 
   const initialUrl = resolveInitialManifestUrl();
   if (initialUrl) {

@@ -1,7 +1,7 @@
 import { buildBookTree, findSection, formatDuration, formatVerseRanges, maxTakeCountForStyle, passageLabel } from "./library.js";
 import { formatRelativeDate, lastAccuracy, lastAttempt, recordAttempt } from "./history.js";
 import { churchFitDescription, churchFitEmoji } from "./style-fit.js";
-import { initGate, isUploadIdentifier } from "./gate.js";
+import { initGate, isUploadIdentifier, isLocalIdentifier } from "./gate.js";
 import { loadState, saveState, SCHEMA_VERSION } from "./storage.js";
 import { MANIFEST_URL_PARAM, PLAYLIST_URL_PARAM } from "./constants.js";
 import {
@@ -47,6 +47,7 @@ import {
   primeResolverCache,
   resolveUrlSync,
 } from "./offline/audio-cache.js";
+import { primeResolverCache as primeLocalResolverCache, resolveUrlSync as resolveLocalUrlSync } from "./offline/local-library.js";
 
 // AI_TODO.md item 7 (offline support): registers the app-shell service
 // worker (assets/js/../../sw.js at the repo root, so its default scope
@@ -396,6 +397,11 @@ function initSelectionUi(manifest, manifestUrl) {
   // uuid -- see gate.js's attemptUpload) counts as "the same library" here
   // just like a repeat URL load does.
   const sameLibrary = manifestUrl !== null && state.manifestUrl === manifestUrl;
+  // A local-folder-loaded manifest (gate.js's isLocalIdentifier) reads
+  // straight off disk via local-library.js -- no network, no Range
+  // requests, and no offline cache to manage (the source *is* already
+  // local), so both get skipped below wherever this is true.
+  const isLocalLibrary = isLocalIdentifier(manifestUrl);
   const playlists = sameLibrary && state.playlists.length ? state.playlists : [createPlaylistRecord("My Playlist")];
   let activePlaylistId =
     sameLibrary && findPlaylist(playlists, state.activePlaylistId) ? state.activePlaylistId : playlists[0].id;
@@ -607,11 +613,12 @@ function initSelectionUi(manifest, manifestUrl) {
     persistActivePlaylist();
   });
 
-  // A synthetic `upload:<uuid>` manifestUrl (AI_TODO.md item 7 -- see
-  // gate.js's isUploadIdentifier) has no meaning to any other browser, so
-  // it's never something the share dialog can offer to bundle -- same
-  // "can't share this library" posture as the old always-null upload case.
-  const shareableManifestUrl = isUploadIdentifier(manifestUrl) ? null : manifestUrl;
+  // A synthetic `upload:<uuid>` or `local:<uuid>` manifestUrl (AI_TODO.md
+  // item 7 -- see gate.js's isUploadIdentifier/isLocalIdentifier) has no
+  // meaning to any other browser, so neither is ever something the share
+  // dialog can offer to bundle -- same "can't share this library" posture
+  // as the old always-null upload case.
+  const shareableManifestUrl = isUploadIdentifier(manifestUrl) || isLocalLibrary ? null : manifestUrl;
 
   // --- Sharing: link/QR (tiered by payload size) or a downloadable file, with an explicit per-share privacy choice -- see AI_TODO.md item 5 ---
   const shareDialog = document.getElementById("shareDialog");
@@ -724,6 +731,11 @@ function initSelectionUi(manifest, manifestUrl) {
   // cache fills up on its own as the Pathfinder studies normally (see the
   // engine.on("blockchange") hook below); this panel is only for seeing/
   // managing what's accumulated and for the deliberate download. ---
+  const offlinePanelEl = document.getElementById("offlinePanel");
+  // Meaningless when the library's already reading straight off local disk
+  // -- there's nothing to fetch ahead of time or cache for a network outage.
+  offlinePanelEl.hidden = isLocalLibrary;
+
   const offlineOpportunisticUsageEl = document.getElementById("offlineOpportunisticUsage");
   const offlineClearOpportunisticBtn = document.getElementById("offlineClearOpportunisticBtn");
   const offlineDownloadUsageEl = document.getElementById("offlineDownloadUsage");
@@ -778,10 +790,16 @@ function initSelectionUi(manifest, manifestUrl) {
   // whatever's actually playing in the background as blocks change --
   // shared across every mode that drives this one engine instance (Karaoke
   // Mode, Sleep Mode, Name that Passage), so this single wiring point
-  // covers all of them.
-  engine.setUrlResolver({ resolve: resolveUrlSync, prime: primeResolverCache });
+  // covers all of them. A local-folder library resolves every block's path
+  // straight off disk instead (local-library.js) -- there's no remote URL to
+  // cache a copy of, so opportunistic caching is skipped entirely for it.
+  if (isLocalLibrary) {
+    engine.setUrlResolver({ resolve: resolveLocalUrlSync, prime: primeLocalResolverCache });
+  } else {
+    engine.setUrlResolver({ resolve: resolveUrlSync, prime: primeResolverCache });
+  }
   engine.on("blockchange", (block) => {
-    if (block) cacheOpportunistically(block.instrumentalUrl, block.vocalUrl).then(refreshOfflineUsage);
+    if (block && !isLocalLibrary) cacheOpportunistically(block.instrumentalUrl, block.vocalUrl).then(refreshOfflineUsage);
   });
 
   // Vibe emoji only here, not the full church-fit phrase (AI_TODO.md item

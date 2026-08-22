@@ -12,3 +12,11 @@ node_modules/
 /scripts/
 /PBE_2026_2027/
 /NEW KING JAMES VERSION.json
+
+# A manifest generated for the gate's "Load Local Folder..." option
+# (assets/js/offline/local-library.js) contains the same not-yet-cleared
+# lyrics/timing content as any other manifest -- see PBE_2026_2027/AGENTS.md.
+# It's now written to PBE_2026_2027/manifest.local.json by default, already
+# covered by the /PBE_2026_2027/ rule above; this extra rule just covers a
+# copy left at the repo root from before that change (or a manual --out).
+/manifest.local.json
