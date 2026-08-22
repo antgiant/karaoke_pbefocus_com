@@ -48,6 +48,12 @@ test("readManifestFromHandle: missing manifest.local.json rejects with a message
   await assert.rejects(readManifestFromHandle(root, validateManifest), /No "manifest\.local\.json" found/);
 });
 
+test("readManifestFromHandle: a file handle that can't actually be read (e.g. a cloud-sync placeholder still hydrating) rejects with a distinct, actionable message -- not the 'not found' or 'invalid JSON' ones", async () => {
+  const ioError = new Error("NetworkError: the requested file could not be read, typically due to permission problems");
+  const root = makeFakeRoot({ "manifest.local.json": ioError });
+  await assert.rejects(readManifestFromHandle(root, validateManifest), /Could not read "manifest\.local\.json".*cloud-synced/s);
+});
+
 test("readManifestFromHandle: invalid JSON rejects with a clear message", async () => {
   const root = makeFakeRoot({ "manifest.local.json": "{not json" });
   await assert.rejects(readManifestFromHandle(root, validateManifest), /did not contain valid JSON/);

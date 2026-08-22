@@ -5,6 +5,10 @@
 // String leaf values become file contents (readable via file.text()); a File's
 // contents are also readable as bytes via a minimal .arrayBuffer() shim below,
 // which is all local-library.js's getFile().getFile() path actually needs.
+// An Error instance as a leaf value simulates a file whose handle can be
+// found (getFileHandle succeeds) but whose content can't actually be read
+// (getFile()/text() throws) -- e.g. a cloud-sync client's not-yet-hydrated
+// placeholder file.
 
 class FakeFileHandle {
   constructor(name, content) {
@@ -13,6 +17,7 @@ class FakeFileHandle {
     this._content = content;
   }
   async getFile() {
+    if (this._content instanceof Error) throw this._content;
     const content = this._content;
     return {
       name: this.name,
@@ -40,7 +45,7 @@ class FakeDirectoryHandle {
   }
   async getFileHandle(name) {
     const entry = this._tree[name];
-    if (typeof entry !== "string") {
+    if (typeof entry !== "string" && !(entry instanceof Error)) {
       const err = new Error(`No such file: ${name}`);
       err.name = "NotFoundError";
       throw err;

@@ -112,10 +112,27 @@ export async function readManifestFromHandle(handle, validateManifest) {
   } catch {
     throw new Error(`No "${MANIFEST_FILENAME}" found in that folder -- see PBE_2026_2027/AGENTS.md for how to generate one.`);
   }
-  const file = await fileHandle.getFile();
+  // getFile()/text() are a separate try/catch from the JSON.parse below on
+  // purpose: an I/O failure here (most likely a cloud-sync client -- OneDrive
+  // Files On-Demand, iCloud, Dropbox -- still hydrating a placeholder file;
+  // see PBE_2026_2027/AGENTS.md's "OneDrive gotcha" for the same failure mode
+  // hitting the pipeline scripts) is a different problem from the file
+  // actually containing bad JSON, and deserves its own message rather than
+  // the misleading "did not contain valid JSON" for something that was never
+  // successfully read at all.
+  let text;
+  try {
+    const file = await fileHandle.getFile();
+    text = await file.text();
+  } catch (e) {
+    throw new Error(
+      `Could not read "${MANIFEST_FILENAME}" (${e.message || "unknown error"}) -- if this folder is ` +
+        `cloud-synced (OneDrive/iCloud/Dropbox), it may still be downloading; wait a moment and try again.`
+    );
+  }
   let json;
   try {
-    json = JSON.parse(await file.text());
+    json = JSON.parse(text);
   } catch {
     throw new Error(`"${MANIFEST_FILENAME}" did not contain valid JSON.`);
   }

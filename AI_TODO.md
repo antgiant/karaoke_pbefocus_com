@@ -27,3 +27,35 @@ to add compatibility shims for hypothetical needs; this note just confirms
 there's no *actual* prior-version data to protect here either.)
 
 ---
+
+## 1. Main "Musical Style" dropdown should offer takes, not just a count hint
+
+Right now `renderStyleOptions` (assets/js/main.js:346) puts one `<option>` per
+style in `#styleSelect`, with a parenthetical `(N takes)` hint computed by
+`maxTakeCountForStyle` (assets/js/library.js:99) -- but that count scans
+every section in the *entire* manifest (`for (const section of
+manifest.sections)`), not the take(s) actually relevant to whatever the
+Pathfinder is currently looking at, and there's no way to pick a specific
+take from this dropdown at all -- the comment right above it says so
+outright ("picking a specific take only happens by painting it in the mix
+editor, not from this selector").
+
+Contrast with Customize Genre Mix's palette (assets/js/mix-editor.js:90-105),
+which already does this the way the Pathfinder wants: it builds one button
+*per take* (`maxTakeCount` from assets/js/mix.js:45, scoped to only the
+currently-selected sections in the mix, not the whole manifest), labeled
+"Style · Take N", using `makePaintId`/`parsePaintId` (assets/js/mix.js) to
+address a specific take as its own paintable id.
+
+Goal: make the main dropdown list every take the same way (e.g. "Broadway ·
+Take 1", "Broadway · Take 2" as separate options), scoped correctly like the
+mix editor's version, rather than one option + an approximate count.
+
+Open question: `mix.defaultStyleId` is documented as "never a paint id with a
+take suffix" (assets/js/mix.js:17) -- it's the uniform fill for newly
+selected sections and the last-resort fallback in program-builder.js. Letting
+the main dropdown select a specific take means either relaxing that
+invariant (defaultStyleId becomes a real paint id, take suffix and all) or
+introducing a separate default-take concept alongside it -- resolve which
+before implementing, it changes what `setDefaultStyle`/`syncMixToSelection`
+(assets/js/mix.js) need to do.
