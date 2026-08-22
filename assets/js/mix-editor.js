@@ -46,6 +46,15 @@ export function mountMixEditor(container, manifest, mix, selectedKeys, onChange)
   let dragStart = null;
   let dragEnd = null;
 
+  // Undo/redo history for paint strokes only (AI_TODO.md item 10) -- one
+  // entry per committed drag/tap gesture, storing the section's *prior*
+  // values for the painted range so an undo can restore them exactly (a run
+  // may have spanned several different styles/takes before the stroke).
+  // Session-only: this array lives in this closure, so it's gone the moment
+  // main.js unmounts/remounts the editor (e.g. on a selection change).
+  const undoStack = [];
+  const redoStack = [];
+
   // One shared preview pair, reused for every take-preview button in every
   // section -- only one preview should ever play at once.
   const previewInstrumentalEl = new Audio();
@@ -107,6 +116,56 @@ export function mountMixEditor(container, manifest, mix, selectedKeys, onChange)
     }
   }
   container.appendChild(palette);
+
+  const historyToolbar = document.createElement("div");
+  historyToolbar.className = "mix-history-toolbar";
+  const undoBtn = document.createElement("button");
+  undoBtn.type = "button";
+  undoBtn.className = "btn secondary tiny";
+  undoBtn.textContent = "↶ Undo";
+  const redoBtn = document.createElement("button");
+  redoBtn.type = "button";
+  redoBtn.className = "btn secondary tiny";
+  redoBtn.textContent = "↷ Redo";
+  undoBtn.addEventListener("click", undo);
+  redoBtn.addEventListener("click", redo);
+  historyToolbar.append(undoBtn, redoBtn);
+  container.appendChild(historyToolbar);
+
+  function updateHistoryButtons() {
+    undoBtn.disabled = undoStack.length === 0;
+    redoBtn.disabled = redoStack.length === 0;
+  }
+  updateHistoryButtons();
+
+  /** Restores `entry`'s snapshot into its section, refreshes those chips, and returns the inverse entry (the range's values just before this restore) so the caller can push it onto the opposite stack. */
+  function applyHistoryEntry(entry) {
+    const assignment = mix.sections.get(entry.sectionKey);
+    if (!assignment) return null;
+    const { startIndex, endIndex, values } = entry;
+    const inverseValues = assignment.slice(startIndex, endIndex + 1);
+    for (let i = startIndex; i <= endIndex; i++) assignment[i] = values[i - startIndex];
+    sectionEls.get(entry.sectionKey)?.refresh();
+    return { sectionKey: entry.sectionKey, startIndex, endIndex, values: inverseValues };
+  }
+
+  function undo() {
+    const entry = undoStack.pop();
+    if (!entry) return;
+    const inverse = applyHistoryEntry(entry);
+    if (inverse) redoStack.push(inverse);
+    updateHistoryButtons();
+    onChange();
+  }
+
+  function redo() {
+    const entry = redoStack.pop();
+    if (!entry) return;
+    const inverse = applyHistoryEntry(entry);
+    if (inverse) undoStack.push(inverse);
+    updateHistoryButtons();
+    onChange();
+  }
 
   const hint = document.createElement("p");
   hint.className = "mix-editor-hint";
@@ -269,7 +328,16 @@ export function mountMixEditor(container, manifest, mix, selectedKeys, onChange)
 
   function commitDrag() {
     if (!dragging || dragSectionKey === null) return;
+    const assignment = mix.sections.get(dragSectionKey);
+    const lo = Math.min(dragStart, dragEnd);
+    const hi = Math.max(dragStart, dragEnd);
+    const before = assignment?.slice(lo, hi + 1) ?? [];
     paintRange(mix, dragSectionKey, dragStart, dragEnd, activePaintId);
+    if (before.some((paintId) => paintId !== activePaintId)) {
+      undoStack.push({ sectionKey: dragSectionKey, startIndex: lo, endIndex: hi, values: before });
+      redoStack.length = 0;
+      updateHistoryButtons();
+    }
     sectionEls.get(dragSectionKey)?.refresh();
     sectionEls.get(dragSectionKey)?.clearSelection();
     dragging = false;

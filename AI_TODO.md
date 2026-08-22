@@ -123,36 +123,6 @@ would need a way to enumerate sections across all playlists),
 
 ---
 
-## 10. [ ] Undo/redo in the mix editor
-
-**Goal:** let a Pathfinder undo (and redo) a mistaken paint stroke in the
-mix editor instead of having to manually repaint over it word-by-word.
-
-**Current state (verified against code):**
-- `mix-editor.js`'s paint gesture (pointerdown/pointerenter drag, or a
-  single tap) calls `paintRange(mix, sectionKeyStr, startIndex,
-  endIndexInclusive, styleId)` (`mix.js:75`), which mutates
-  `mix.sections.get(key)` in place, overwriting whatever style was there
-  before -- the prior values aren't captured anywhere, so the only way back
-  today is manually repainting the correct style back over the same range.
-- No history/undo-stack concept exists anywhere in `mix.js` or
-  `mix-editor.js` today.
-
-**Decided (confirmed with the user):**
-- Scoped to paint strokes only -- one undo step per drag/tap paint
-  gesture. Take-rank changes and style-select changes stay outside this
-  history (not combined into one undo model).
-- Unlimited undo steps for the current editing session -- no capped stack,
-  no eviction logic needed.
-- Session-only -- cleared once the mix editor closes/unmounts, not
-  persisted in the playlist record across a reload.
-
-**Relevant files:** `assets/js/mix-editor.js` (the paint gesture handlers),
-`assets/js/mix.js` (`paintRange`, and wherever a snapshot/history array
-would need to hook in).
-
----
-
 ## 11. [ ] Port the "Rogue Sheep" easter egg from pbe-practice-engine
 
 **Goal:** bring over the "Rogue Sheep" whimsical easter egg from the

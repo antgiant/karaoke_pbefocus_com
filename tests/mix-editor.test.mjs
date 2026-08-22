@@ -102,3 +102,60 @@ test("unmount doesn't throw and removes its window listeners", () => {
   const { handle } = setup({ takeCount: 2 });
   assert.doesNotThrow(() => handle.unmount());
 });
+
+function paintWord(container, chipIndex, swatchIndex) {
+  const swatches = [...container.querySelectorAll(".style-swatch")];
+  swatches[swatchIndex].click();
+  const chip = container.querySelectorAll(".word-chip")[chipIndex];
+  chip.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+  window.dispatchEvent(new Event("pointerup"));
+}
+
+test("undo and redo buttons start disabled", () => {
+  const { container } = setup({ takeCount: 2 });
+  const [undoBtn, redoBtn] = container.querySelectorAll(".mix-history-toolbar button");
+  assert.ok(undoBtn.disabled);
+  assert.ok(redoBtn.disabled);
+});
+
+test("undo restores the pre-paint style and re-enables redo; redo re-applies the paint", () => {
+  const { container, mix, key, getChangeCount } = setup({ takeCount: 2 });
+  const [undoBtn, redoBtn] = container.querySelectorAll(".mix-history-toolbar button");
+
+  paintWord(container, 0, 1); // paint word 0 to take 2
+  assert.equal(mix.sections.get(key)[0], makePaintId("hiphop", 1));
+  assert.ok(!undoBtn.disabled);
+
+  undoBtn.click();
+  assert.equal(mix.sections.get(key)[0], "hiphop"); // back to the original default paint id
+  assert.ok(undoBtn.disabled);
+  assert.ok(!redoBtn.disabled);
+  assert.equal(getChangeCount(), 2); // one for the paint, one for the undo
+
+  redoBtn.click();
+  assert.equal(mix.sections.get(key)[0], makePaintId("hiphop", 1));
+  assert.ok(!undoBtn.disabled);
+  assert.ok(redoBtn.disabled);
+  assert.equal(getChangeCount(), 3);
+});
+
+test("painting a word with the style it's already painted doesn't add an undo step", () => {
+  const { container } = setup({ takeCount: 1 }); // mix.defaultStyleId is "hiphop", same as the only swatch
+  const [undoBtn] = container.querySelectorAll(".mix-history-toolbar button");
+
+  paintWord(container, 0, 0); // repaint word 0 with the style it already has
+  assert.ok(undoBtn.disabled);
+});
+
+test("a new paint stroke clears the redo stack", () => {
+  const { container, mix, key } = setup({ takeCount: 2 });
+  const [, redoBtn] = container.querySelectorAll(".mix-history-toolbar button");
+
+  paintWord(container, 0, 1);
+  container.querySelectorAll(".mix-history-toolbar button")[0].click(); // undo
+  assert.ok(!redoBtn.disabled);
+
+  paintWord(container, 1, 1); // a fresh stroke on a different word
+  assert.ok(redoBtn.disabled);
+  assert.equal(mix.sections.get(key)[1], makePaintId("hiphop", 1));
+});

@@ -1021,6 +1021,12 @@ dialog#shareDialog h2 {
   padding-left: 0.3rem;
 }
 
+.mix-history-toolbar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
 .mix-editor-hint {
   margin: 0 0 1rem;
   color: var(--teal-dark);
