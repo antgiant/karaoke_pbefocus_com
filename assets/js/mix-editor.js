@@ -40,7 +40,7 @@ export function mountMixEditor(container, manifest, mix, selectedKeys, onChange)
   container.innerHTML = "";
   container.className = "mix-editor";
 
-  let activePaintId = mix.defaultStyleId; // mix.defaultStyleId is always rank 0 (a plain style id) -- see mix.js
+  let activePaintId = mix.defaultStyleId; // whatever take the main style <select> is currently set to (mix.js)
   let dragging = false;
   let dragSectionKey = null;
   let dragStart = null;

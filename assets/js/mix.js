@@ -14,11 +14,13 @@ import { canonicalWords, findSection, listTakes, orderedSections, sectionKey } f
  * take is just another paintable brush alongside each style, not a
  * separate take-selector control layered on top of style painting (the
  * old mix.defaultTakeRank/mix.takeOverrides/getTakeRank/setTakeRank, now
- * removed). mix.defaultStyleId itself is never a paint id with a take
- * suffix -- it's always a plain style id, since it's just the uniform fill
- * for newly-selected sections (see syncMixToSelection) and the last-resort
- * fallback in program-builder.js, not something a Pathfinder paints
- * directly.
+ * removed). mix.defaultStyleId is a paint id too -- the main style <select>
+ * (main.js's renderStyleOptions) offers one option per take, same as the
+ * mix editor's palette, so picking a take there is just picking a
+ * different paint id as the default. It's still the uniform fill for
+ * newly-selected sections (see syncMixToSelection) and the last-resort
+ * fallback in program-builder.js -- those just don't care that the id
+ * might carry a take suffix.
  */
 const TAKE_MARK = "::take";
 

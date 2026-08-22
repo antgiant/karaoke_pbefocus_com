@@ -1,4 +1,4 @@
-import { buildBookTree, findSection, formatDuration, formatVerseRanges, maxTakeCountForStyle, passageLabel } from "./library.js";
+import { buildBookTree, findSection, formatDuration, formatVerseRanges, passageLabel } from "./library.js";
 import { formatRelativeDate, lastAccuracy, lastAttempt, recordAttempt } from "./history.js";
 import { churchFitDescription, churchFitEmoji } from "./style-fit.js";
 import { initGate, isUploadIdentifier, isLocalIdentifier, isOneDriveShareLink } from "./gate.js";
@@ -15,7 +15,7 @@ import {
   summarize,
   toggleKey,
 } from "./selection.js";
-import { createMix, fromSerializable, setDefaultStyle, syncMixToSelection, toSerializable } from "./mix.js";
+import { createMix, fromSerializable, makePaintId, maxTakeCount, parsePaintId, setDefaultStyle, syncMixToSelection, toSerializable } from "./mix.js";
 import { createPlaylistRecord, defaultStudyOptions, findPlaylist, renamePlaylist, duplicatePlaylist, deletePlaylist } from "./playlists.js";
 import {
   serializePlaylistForShare,
@@ -314,10 +314,10 @@ function renderBookTree(manifest, selected, verseSelections, onChange, practiceH
  * original design) made the closed <select> render far too wide on
  * mobile, since it sizes to its longest option.
  */
-function updateStyleFitBadge(manifest, styleId) {
+function updateStyleFitBadge(manifest, paintId) {
   const badge = document.getElementById("styleFitBadge");
   const tooltip = document.getElementById("styleFitTooltip");
-  const style = manifest.styles.find((s) => s.id === styleId);
+  const style = manifest.styles.find((s) => s.id === parsePaintId(paintId).styleId);
   const description = style?.churchFit ? churchFitDescription(style.churchFit) : "";
   badge.textContent = style?.churchFit ? churchFitEmoji(style.churchFit) : "";
   badge.title = description;
@@ -344,33 +344,48 @@ function wireStyleFitBadge() {
 }
 wireStyleFitBadge();
 
-function renderStyleOptions(manifest, selectedStyleId) {
+/**
+ * Rebuilds the main style <select>'s options -- one per take, not just a
+ * count hint (AI_TODO.md item 1), scoped to the currently-selected sections
+ * exactly like the mix editor's palette (maxTakeCount), so both controls
+ * agree on how many takes a style has worth offering right now.
+ */
+function renderStyleOptions(manifest, mix) {
   const select = document.getElementById("styleSelect");
   select.innerHTML = "";
+  const optionValues = new Set();
   for (const style of manifest.styles) {
-    const option = document.createElement("option");
-    option.value = style.id;
-    // Just "<vibe emoji> <label>" -- the church-fit phrase used to be
-    // appended here too, but that made the closed <select> render far too
-    // wide on mobile (it sizes to its longest option's text). The emoji +
-    // full phrase now live in the #styleFitBadge next to the dropdown
+    // Just "<vibe emoji> <label>[ · Take N]" -- the church-fit phrase used
+    // to be appended here too, but that made the closed <select> render far
+    // too wide on mobile (it sizes to its longest option's text). The emoji
+    // + full phrase now live in the #styleFitBadge next to the dropdown
     // (updateStyleFitBadge) instead, plus a per-option `title` here as a
     // bonus hover tooltip on desktop browsers that render one (most do;
     // it's inert, not broken, on ones that don't -- the badge is the
     // reliable source either way).
     const vibe = style.emoji ? `${style.emoji} ` : "";
-    // Take count (AI_TODO.md item 1) -- lets a Pathfinder know before
-    // drilling into Customize Genre Mix whether this style even has
-    // alternate takes worth exploring there; picking a specific take only
-    // happens by painting it in the mix editor, not from this selector.
-    const takeCount = maxTakeCountForStyle(manifest, style.id);
-    const takeNote = takeCount > 1 ? ` (${takeCount} takes)` : "";
-    option.textContent = `${vibe}${style.label}${takeNote}`;
-    if (style.churchFit) option.title = churchFitDescription(style.churchFit);
-    select.appendChild(option);
+    const takeCount = maxTakeCount(manifest, mix, style.id);
+    for (let rank = 0; rank < takeCount; rank++) {
+      const paintId = makePaintId(style.id, rank);
+      const option = document.createElement("option");
+      option.value = paintId;
+      option.textContent = takeCount > 1 ? `${vibe}${style.label} · Take ${rank + 1}` : `${vibe}${style.label}`;
+      if (style.churchFit) option.title = churchFitDescription(style.churchFit);
+      select.appendChild(option);
+      optionValues.add(paintId);
+    }
   }
-  select.value = selectedStyleId;
-  updateStyleFitBadge(manifest, selectedStyleId);
+  // mix.defaultStyleId's chosen take might not exist among the
+  // currently-selected sections any more (e.g. the one section with a 2nd
+  // take just got deselected) -- fall back to that style's rank 0, the same
+  // "take 1 is always a safe, present fallback" behavior pickRecording
+  // already uses (library.js). This only affects what's *displayed*; it
+  // doesn't rewrite the stored mix.defaultStyleId.
+  const displayValue = optionValues.has(mix.defaultStyleId)
+    ? mix.defaultStyleId
+    : makePaintId(parsePaintId(mix.defaultStyleId).styleId, 0);
+  select.value = displayValue;
+  updateStyleFitBadge(manifest, displayValue);
   return select;
 }
 
@@ -497,7 +512,7 @@ function initSelectionUi(manifest, manifestUrl) {
     persistFullState();
   }
 
-  const styleSelect = renderStyleOptions(manifest, mix.defaultStyleId);
+  const styleSelect = renderStyleOptions(manifest, mix);
   const mixEditorContainer = document.getElementById("mixEditor");
   const toggleMixEditorBtn = document.getElementById("toggleMixEditorBtn");
   let mixEditorHandle = null;
@@ -513,6 +528,7 @@ function initSelectionUi(manifest, manifestUrl) {
 
   function rerender() {
     syncMixToSelection(mix, manifest, selected);
+    renderStyleOptions(manifest, mix); // take counts are scoped to the current selection, so re-derive on every selection change
     persistActivePlaylist();
     renderBookTree(manifest, selected, verseSelections, rerender, practiceHistory);
     renderSummary(selected, manifest, verseSelections);
@@ -565,8 +581,7 @@ function initSelectionUi(manifest, manifestUrl) {
     if (id !== activePlaylistId) persistActivePlaylist();
     activePlaylistId = id;
     loadActivePlaylistIntoMemory();
-    styleSelect.value = mix.defaultStyleId; // same manifest/style list across playlists -- just move the selection
-    updateStyleFitBadge(manifest, mix.defaultStyleId);
+    renderStyleOptions(manifest, mix); // same manifest/style list across playlists, but take counts are scoped to this playlist's own selection
     syncStudyOptionsFromActivePlaylist();
     renderPlaylistSelect();
     renderBookTree(manifest, selected, verseSelections, rerender, practiceHistory);
@@ -609,8 +624,7 @@ function initSelectionUi(manifest, manifestUrl) {
     if (!confirm(`Delete "${current.name}"? This can't be undone.`)) return;
     activePlaylistId = deletePlaylist(playlists, activePlaylistId);
     loadActivePlaylistIntoMemory();
-    styleSelect.value = mix.defaultStyleId;
-    updateStyleFitBadge(manifest, mix.defaultStyleId);
+    renderStyleOptions(manifest, mix);
     syncStudyOptionsFromActivePlaylist();
     renderPlaylistSelect();
     renderBookTree(manifest, selected, verseSelections, rerender, practiceHistory);
