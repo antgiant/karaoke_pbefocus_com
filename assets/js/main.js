@@ -1,7 +1,7 @@
 import { buildBookTree, findSection, formatDuration, formatVerseRanges, passageLabel } from "./library.js";
 import { formatRelativeDate, lastAccuracy, lastAttempt, recordAttempt } from "./history.js";
 import { churchFitDescription, churchFitEmoji } from "./style-fit.js";
-import { initGate, isUploadIdentifier, isLocalIdentifier, isOneDriveShareLink } from "./gate.js";
+import { initGate, isUploadIdentifier, isLocalIdentifier, isOneDriveShareLink, isGoogleDriveShareLink } from "./gate.js";
 import { loadState, saveState, SCHEMA_VERSION } from "./storage.js";
 import { MANIFEST_URL_PARAM, PLAYLIST_URL_PARAM } from "./constants.js";
 import {
@@ -49,6 +49,7 @@ import {
 } from "./offline/audio-cache.js";
 import { primeResolverCache as primeLocalResolverCache, resolveUrlSync as resolveLocalUrlSync } from "./offline/local-library.js";
 import { primeResolverCache as primeOneDriveResolverCache, resolveUrlSync as resolveOneDriveUrlSync } from "./offline/onedrive-library.js";
+import { primeResolverCache as primeGoogleDriveResolverCache, resolveUrlSync as resolveGoogleDriveUrlSync } from "./offline/googledrive-library.js";
 
 // AI_TODO.md item 7 (offline support): registers the app-shell service
 // worker (assets/js/../../sw.js at the repo root, so its default scope
@@ -425,6 +426,11 @@ function initSelectionUi(manifest, manifestUrl) {
   // wiring below for why it needs its own branch there, distinct from
   // both the hosted and local-folder cases.
   const isOneDriveLibrary = isOneDriveShareLink(manifestUrl);
+  // A Google Drive-folder-link library (gate.js's isGoogleDriveShareLink)
+  // works the same way as the OneDrive case just above -- its own resolver
+  // (offline/googledrive-library.js) that fetches+caches each recording's
+  // bytes itself -- so it needs the same distinct branch below.
+  const isGoogleDriveLibrary = isGoogleDriveShareLink(manifestUrl);
   const playlists = sameLibrary && state.playlists.length ? state.playlists : [createPlaylistRecord("My Playlist")];
   let activePlaylistId =
     sameLibrary && findPlaylist(playlists, state.activePlaylistId) ? state.activePlaylistId : playlists[0].id;
@@ -824,16 +830,19 @@ function initSelectionUi(manifest, manifestUrl) {
     // be redundant (and wrong: instrumentalUrl/vocalUrl here are relative
     // paths, not directly fetchable URLs) and is skipped for it too.
     engine.setUrlResolver({ resolve: resolveOneDriveUrlSync, prime: primeOneDriveResolverCache });
+  } else if (isGoogleDriveLibrary) {
+    engine.setUrlResolver({ resolve: resolveGoogleDriveUrlSync, prime: primeGoogleDriveResolverCache });
   } else {
     engine.setUrlResolver({ resolve: resolveUrlSync, prime: primeResolverCache });
   }
   engine.on("blockchange", (block) => {
     if (!block) return;
     if (isLocalLibrary) return;
-    if (isOneDriveLibrary) {
-      // Caching itself already happened in primeOneDriveResolverCache
-      // (before this block started playing) -- just pick up whatever it
-      // added to the shared usage index the storage-usage UI reads.
+    if (isOneDriveLibrary || isGoogleDriveLibrary) {
+      // Caching itself already happened in primeOneDriveResolverCache/
+      // primeGoogleDriveResolverCache (before this block started playing)
+      // -- just pick up whatever it added to the shared usage index the
+      // storage-usage UI reads.
       refreshOfflineUsage();
       return;
     }

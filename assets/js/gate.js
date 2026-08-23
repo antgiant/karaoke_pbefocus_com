@@ -18,9 +18,16 @@ import {
   readManifestFromOneDrive,
   setActiveRoot as setActiveOneDriveRoot,
 } from "./offline/onedrive-library.js";
+import {
+  isGoogleDriveShareLink,
+  resolveGoogleDriveFolder,
+  readManifestFromGoogleDrive,
+  setActiveRoot as setActiveGoogleDriveRoot,
+} from "./offline/googledrive-library.js";
 
 export { isLocalIdentifier } from "./offline/local-library.js";
 export { isOneDriveShareLink } from "./offline/onedrive-library.js";
+export { isGoogleDriveShareLink } from "./offline/googledrive-library.js";
 
 // AI_TODO.md item 7 (offline support): an uploaded manifest has no URL of
 // its own, so it's remembered under a synthetic identifier of this shape
@@ -240,6 +247,30 @@ export function initGate({ onUnlocked }) {
     }
   }
 
+  /**
+   * A Google Drive folder sharing link, pasted into the same box a hosted
+   * manifest URL goes in -- same posture as attemptOneDrive above (stored
+   * as the literal share URL, no synthetic identifier), but with no
+   * sign-in step: the Drive API accepts a plain, referrer-restricted API
+   * key for a folder shared "Anyone with the link" (see
+   * offline/googledrive-library.js's file-top comment and
+   * PBE_2026_2027/AGENTS.md's "Google Drive folder-link library source").
+   */
+  async function attemptGoogleDrive(url) {
+    submitBtn.disabled = true;
+    showStatus("Reading Google Drive folder…");
+    try {
+      const root = await resolveGoogleDriveFolder(url, showStatus);
+      const manifest = await readManifestFromGoogleDrive(root, validateManifest, showStatus);
+      setActiveGoogleDriveRoot(root);
+      unlock(manifest, url);
+    } catch (e) {
+      showError(e.message || "Could not load that Google Drive folder.");
+    } finally {
+      submitBtn.disabled = false;
+    }
+  }
+
   async function attempt(url) {
     if (!url) return;
     if (isUploadIdentifier(url)) {
@@ -253,6 +284,11 @@ export function initGate({ onUnlocked }) {
     if (isOneDriveShareLink(url)) {
       input.value = url;
       await attemptOneDrive(url);
+      return;
+    }
+    if (isGoogleDriveShareLink(url)) {
+      input.value = url;
+      await attemptGoogleDrive(url);
       return;
     }
     input.value = url;
