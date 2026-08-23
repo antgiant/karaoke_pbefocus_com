@@ -216,11 +216,10 @@ export function seekReliably(el, time) {
 /**
  * Wires one <audio> element into `audioContext`'s graph for true pitch
  * shift (AI_TODO.md item 4): source -> pitch-shift AudioWorkletNode ->
- * [dry: destination] + [wet: reverbInput, the shared echo/reverb send].
- * `el.volume` keeps doing everything it always did (envelope/duck/track
- * volume, see makeSource below) -- createMediaElementSource does NOT bypass
- * an element's own .volume, it's still applied to what the graph receives,
- * so none of that existing logic needed to change.
+ * trackGain -> [dry: masterOut] + [wet: reverbInput, the shared echo/reverb
+ * send]. Envelope/duck/track-balance volume (makeSource's applyVolumes)
+ * goes through trackGain's AudioParam rather than the element's own
+ * .volume -- see trackGain's own doc comment below for why.
  *
  * The pitch-shift node can't be created until pitch-shift-processor.js's
  * AudioWorkletProcessor has finished loading (audioWorklet.addModule is
@@ -235,13 +234,30 @@ export function seekReliably(el, time) {
 function wireIntoAudioGraph(el, audioContext, workletReady, reverbInput, masterOut) {
   if (!audioContext) return null;
   const sourceNode = audioContext.createMediaElementSource(el);
+  // Envelope/duck/track-balance volume (makeSource's applyVolumes) is
+  // driven through this GainNode's AudioParam rather than the element's own
+  // .volume, even though .volume is nominally still respected once an
+  // element feeds a MediaElementAudioSourceNode. In practice, on Safari,
+  // it isn't reliable: applyVolumes() gets called up to ~60x/sec (every
+  // tick() -- stepDuck runs unconditionally, not just while a duck fade is
+  // actually in progress), and that frequency of .volume writes on a
+  // captured element causes real, audible glitches/pitch instability on
+  // Safari specifically (confirmed live: it got dramatically better the
+  // instant the tab lost focus and requestAnimationFrame -- and therefore
+  // the write frequency -- got throttled). A GainNode's gain param is a
+  // proper Web Audio automation target, built for exactly this frequency
+  // of change, and unlike .volume never touches the element/decoder at
+  // all. See makeSource's applyVolumes for the no-Web-Audio-support
+  // fallback (setGain won't exist there, so .volume is still used).
+  const trackGain = audioContext.createGain();
   const wetGain = audioContext.createGain();
   wetGain.gain.value = 0;
+  trackGain.connect(masterOut);
+  trackGain.connect(wetGain);
   wetGain.connect(reverbInput);
   let pitchNode = null;
   let pendingPitchFactor = 1; // set(...) before the worklet's ready -- applied the instant it is, see below
-  sourceNode.connect(masterOut);
-  sourceNode.connect(wetGain);
+  sourceNode.connect(trackGain);
 
   workletReady.then(() => {
     pitchNode = new AudioWorkletNode(audioContext, "pitch-shift-processor", {
@@ -249,11 +265,9 @@ function wireIntoAudioGraph(el, audioContext, workletReady, reverbInput, masterO
       numberOfOutputs: 1,
       outputChannelCount: [2],
     });
-    sourceNode.disconnect(masterOut);
-    sourceNode.disconnect(wetGain);
+    sourceNode.disconnect(trackGain);
     sourceNode.connect(pitchNode);
-    pitchNode.connect(masterOut);
-    pitchNode.connect(wetGain);
+    pitchNode.connect(trackGain);
     if (pendingPitchFactor !== 1) pitchNode.port.postMessage({ pitchFactor: pendingPitchFactor });
   });
 
@@ -264,6 +278,9 @@ function wireIntoAudioGraph(el, audioContext, workletReady, reverbInput, masterO
     },
     setReverbAmount(amount) {
       wetGain.gain.value = amount;
+    },
+    setGain(value) {
+      trackGain.gain.value = value;
     },
   };
 }
@@ -288,13 +305,23 @@ function makeSource(audioContext, workletReady, reverbInput, masterOut) {
   let instrumentalTrackVolume = 1;
   let vocalTrackVolume = 1;
 
-  function applyVolumes() {
-    instrumentalEl.volume = envelopeVolume * instrumentalTrackVolume;
-    vocalEl.volume = envelopeVolume * duckFactor * vocalTrackVolume;
-  }
-
   const instrumentalGraph = wireIntoAudioGraph(instrumentalEl, audioContext, workletReady, reverbInput, masterOut);
   const vocalGraph = wireIntoAudioGraph(vocalEl, audioContext, workletReady, reverbInput, masterOut);
+
+  // Prefer each graph's GainNode (see wireIntoAudioGraph's doc comment on
+  // why -- Safari specifically doesn't tolerate frequent .volume writes on
+  // an element that's been captured by createMediaElementSource). Only
+  // falls back to the element's own .volume when there's no Web Audio
+  // graph at all (wireIntoAudioGraph returns null -- unsupported browser),
+  // never both at once, which would double-attenuate.
+  function applyVolumes() {
+    const instrumentalValue = envelopeVolume * instrumentalTrackVolume;
+    const vocalValue = envelopeVolume * duckFactor * vocalTrackVolume;
+    if (instrumentalGraph) instrumentalGraph.setGain(instrumentalValue);
+    else instrumentalEl.volume = instrumentalValue;
+    if (vocalGraph) vocalGraph.setGain(vocalValue);
+    else vocalEl.volume = vocalValue;
+  }
 
   return {
     get src() {
