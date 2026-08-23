@@ -500,6 +500,14 @@ function initSelectionUi(manifest, manifestUrl) {
     record.activeStyle = mix.defaultStyleId;
     record.mix = toSerializable(mix);
     record.studyOptions = {
+      // Preserve whatever this function doesn't itself own (currently just
+      // instrumentalVolume/vocalVolume, written directly by
+      // writeStemVolumeChange/Sleep Mode's onVolumesChange) -- without this
+      // spread, any call here wholesale-replaces studyOptions and silently
+      // drops those fields back to defaultStudyOptions()'s 100%/100%
+      // (caught live: selecting a chapter right after dragging a Track
+      // Balance slider reverted it).
+      ...(record.studyOptions ?? defaultStudyOptions()),
       blankPercent: Math.min(100, Math.max(0, Number(hintLevelInput.value) || 0)),
       rampOnRepeat: rampCheckbox.checked,
       lengthMatched: lengthMatchedCheckbox.checked,
@@ -952,6 +960,45 @@ function initSelectionUi(manifest, manifestUrl) {
   const reverbSlider = document.getElementById("reverbSlider");
   const reverbValueLabel = document.getElementById("reverbValueLabel");
 
+  // Track Balance -- independent instrumental/vocal volume, same
+  // playlist-scoped studyOptions field Sleep Mode's own sliders already
+  // read/write (record.studyOptions.instrumentalVolume/vocalVolume, see
+  // playlists.js's defaultStudyOptions), so a balance set here carries over
+  // into Sleep Mode too and vice versa -- one preference per playlist, not
+  // a separate one per mode. Unlike pitch/rate/reverb above, this has no
+  // three-tier scope: engine.setStemTrackVolumes is a direct, immediate
+  // engine call (same mechanism Sleep Mode/name-that-passage.js already
+  // use), not resolved per-block, so it's pushed to the engine explicitly
+  // here and again whenever Karaoke Mode launches (see launchKaraokeStudy)
+  // rather than flowing through setKaraokeControlsResolver.
+  const instrumentalVolumeSlider = document.getElementById("instrumentalVolumeSlider");
+  const instrumentalVolumeValueLabel = document.getElementById("instrumentalVolumeValueLabel");
+  const vocalVolumeSlider = document.getElementById("vocalVolumeSlider");
+  const vocalVolumeValueLabel = document.getElementById("vocalVolumeValueLabel");
+
+  function applyStemVolumesForActivePlaylist() {
+    const record = findPlaylist(playlists, activePlaylistId);
+    const { instrumentalVolume = 1, vocalVolume = 1 } = record.studyOptions ?? defaultStudyOptions();
+    engine.setStemTrackVolumes({ instrumental: instrumentalVolume, vocal: vocalVolume });
+    return { instrumentalVolume, vocalVolume };
+  }
+
+  function writeStemVolumeChange(field, percent) {
+    const record = findPlaylist(playlists, activePlaylistId);
+    record.studyOptions = { ...(record.studyOptions ?? defaultStudyOptions()), [field]: percent / 100 };
+    persistFullState();
+    applyStemVolumesForActivePlaylist();
+  }
+
+  instrumentalVolumeSlider.addEventListener("input", () => {
+    instrumentalVolumeValueLabel.textContent = `${instrumentalVolumeSlider.value}%`;
+    writeStemVolumeChange("instrumentalVolume", Number(instrumentalVolumeSlider.value));
+  });
+  vocalVolumeSlider.addEventListener("input", () => {
+    vocalVolumeValueLabel.textContent = `${vocalVolumeSlider.value}%`;
+    writeStemVolumeChange("vocalVolume", Number(vocalVolumeSlider.value));
+  });
+
   // Study panel text size (AI_TODO.md item 9) -- its own persisted value,
   // independent of the three-tier Karaoke Controls above and of Sleep
   // Mode's own slider (wired where mountSleepMode is called below).
@@ -1028,6 +1075,16 @@ function initSelectionUi(manifest, manifestUrl) {
     reverbSlider.value = String(resolved.reverbAmount);
     updateControlLabels(resolved);
     updateClearOverrideButton();
+
+    // Re-push to the engine too (not just redisplay) -- switching playlists
+    // needs the newly-active one's balance actually applied, since this is
+    // a direct engine.setStemTrackVolumes call rather than something
+    // resolved fresh per block the way pitch/rate/reverb are.
+    const { instrumentalVolume, vocalVolume } = applyStemVolumesForActivePlaylist();
+    instrumentalVolumeSlider.value = String(Math.round(instrumentalVolume * 100));
+    instrumentalVolumeValueLabel.textContent = `${Math.round(instrumentalVolume * 100)}%`;
+    vocalVolumeSlider.value = String(Math.round(vocalVolume * 100));
+    vocalVolumeValueLabel.textContent = `${Math.round(vocalVolume * 100)}%`;
   }
 
   /** Writes one field's new value into whichever tier the scope selector currently points at -- app default (a direct edit), or a *partial* update to the playlist/section override object (only this field, leaving whatever else that tier has already customized untouched). */
@@ -1125,6 +1182,11 @@ function initSelectionUi(manifest, manifestUrl) {
     }
 
     engine.loadProgram(program);
+    // Sleep Mode/name-that-passage.js reset the engine's stem volumes to
+    // 1/1 on their own exit (the engine is shared) -- re-push the active
+    // playlist's own balance explicitly rather than relying on it still
+    // being live from the last syncControlsPanelFromState() call.
+    applyStemVolumesForActivePlaylist();
 
     if (scoredCheckbox.checked) {
       unmountStudyView = mountSingAlong(karaokeView, engine, manifest, displayMix, verseFilter, logAttempt);

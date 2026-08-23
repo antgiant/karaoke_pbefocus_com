@@ -281,6 +281,21 @@
             <span id="reverbValueLabel" class="control-value-label">Off</span>
           </div>
 
+          <h3 class="karaoke-mode-heading">Track Balance</h3>
+          <p class="ab-loop-hint">Independent instrumental/vocal volume -- this playlist only, same balance in every mode.</p>
+          <div class="hint-slider-row">
+            <span class="hint-slider-endlabel">🎹 Off</span>
+            <input type="range" id="instrumentalVolumeSlider" min="0" max="100" step="1" value="100" aria-label="Instrumental volume" />
+            <span class="hint-slider-endlabel">Full</span>
+            <span id="instrumentalVolumeValueLabel" class="control-value-label">100%</span>
+          </div>
+          <div class="hint-slider-row">
+            <span class="hint-slider-endlabel">🎤 Off</span>
+            <input type="range" id="vocalVolumeSlider" min="0" max="100" step="1" value="100" aria-label="Vocal volume" />
+            <span class="hint-slider-endlabel">Full</span>
+            <span id="vocalVolumeValueLabel" class="control-value-label">100%</span>
+          </div>
+
           <h3 class="karaoke-mode-heading">A/B Loop</h3>
           <p class="ab-loop-hint">
             Once something's playing, pick a verse to loop just that verse for drilling, or loop the whole chapter.

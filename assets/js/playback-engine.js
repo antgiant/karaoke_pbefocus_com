@@ -42,7 +42,7 @@ function semitonesToRatio(semitones) {
   return Math.pow(2, semitones / 12);
 }
 
-/** Builds the shared reverb/echo send network for one AudioContext: a delay line with feedback for a repeating tail, plus an input gain every source's wet send connects into and an output already wired to `masterOut` (see createMasterLimiter). */
+/** Builds the shared reverb/echo send network for one AudioContext: a delay line with feedback for a repeating tail, plus an input gain every source's wet send connects into and an output already wired to `masterOut` (see createMasterBus). */
 function createReverbNetwork(audioContext, masterOut) {
   const input = audioContext.createGain();
   const delay = audioContext.createDelay(1);
@@ -56,62 +56,51 @@ function createReverbNetwork(audioContext, masterOut) {
   return input;
 }
 
-// Below SATURATOR_KNEE, buildSaturatorCurve is exactly transparent (y = x);
-// above it, output eases asymptotically toward SATURATOR_KNEE + (1 -
-// SATURATOR_KNEE) * tanh(1) (~0.976, about -0.2dBFS) no matter how far
-// above 1 the input goes -- WaveShaperNode clamps any input outside [-1, 1]
-// to the curve's own endpoint sample, so that asymptote is a hard ceiling
-// on the node's output, not just a shape.
-const SATURATOR_KNEE = 0.9;
-const SATURATOR_CURVE_SAMPLES = 4096;
-
-/** A per-sample soft-clip curve for createMasterLimiter's final safety stage -- see that function's doc comment for why a curve (zero-latency, can't overshoot) rather than another dynamics stage. */
-function buildSaturatorCurve() {
-  const curve = new Float32Array(SATURATOR_CURVE_SAMPLES);
-  for (let i = 0; i < SATURATOR_CURVE_SAMPLES; i++) {
-    const x = (i / (SATURATOR_CURVE_SAMPLES - 1)) * 2 - 1;
-    const ax = Math.abs(x);
-    if (ax <= SATURATOR_KNEE) {
-      curve[i] = x;
-    } else {
-      const sign = Math.sign(x);
-      const t = (ax - SATURATOR_KNEE) / (1 - SATURATOR_KNEE);
-      curve[i] = sign * (SATURATOR_KNEE + (1 - SATURATOR_KNEE) * Math.tanh(t));
-    }
-  }
-  return curve;
-}
-
 /**
  * Every recording's instrumental+vocal stems are separated (and each
  * individually loudness-rescaled) by scripts/separate_stems.py, which has
  * no way to know the two will be summed back together at full volume on
- * playback (see the file-top comment) -- so a stem pair that's each
- * individually just under 0dBFS can clip once mixed, and two overlapping
- * blocks during a crossfade raise that risk further. Two stages in series:
- * a DynamicsCompressorNode with a near-0dB threshold and a fast attack
- * handles sustained loudness smoothly, but its attack time (however fast)
- * is still nonzero, so a genuinely sharp transient (a hit consonant, a
- * downbeat) can punch through in the instant before gain reduction
- * engages -- confirmed in practice: the compressor alone made clipping
- * rare rather than eliminating it. A WaveShaperNode has no attack/release
- * at all (a static per-sample curve, not a dynamics process), so it can't
- * be outrun by a transient the way the compressor can -- see
- * buildSaturatorCurve for why its ceiling is a hard one.
+ * playback (see the file-top comment) -- and now that instrumental/vocal
+ * can also be independently boosted (setStemTrackVolumes/Karaoke Controls'
+ * instrumentalVolume+vocalVolume), the combined peak depends on whatever
+ * mix the Pathfinder has dialed in, not just the source material. So the
+ * combined signal can exceed 0dBFS in a way no fixed per-stem mastering
+ * step could have anticipated, regardless of how it's balanced.
+ *
+ * Two things were tried and rejected before this: a plain
+ * DynamicsCompressorNode alone wasn't enough -- it has no true lookahead,
+ * so a genuinely sharp transient can still punch through in the few
+ * milliseconds before its gain reduction engages (confirmed live:
+ * occasional pops survived). Adding a WaveShaperNode soft-clip after it
+ * made things *worse* -- its curve had to start bending well below 0dBFS
+ * to have any safety margin at all, which meant it was audibly coloring
+ * ordinary loud (non-clipping) passages, not just the rare true peak.
+ *
+ * audio/limiter-processor.js fixes the root issue directly with a real
+ * lookahead limiter: it delays the signal by a few ms while computing gain
+ * reduction from the *undelayed* input, so by the time any given sample
+ * reaches the front of that delay it's already been reduced -- true
+ * zero-overshoot limiting, not a reactive one (see that file's doc comment
+ * for the algorithm; audio/limiter-math.js is the same math extracted into
+ * a plain, unit-tested module -- tests/limiter-math.test.mjs).
+ *
+ * Like the pitch-shift worklet, the AudioWorkletNode itself can't be
+ * constructed until its module's loaded, so this returns a plain GainNode
+ * every source connects into immediately (never itself needing to be
+ * rewired) that falls back to a direct connection to `destination` until
+ * the limiter's ready, then gets spliced in front of it -- same
+ * connect-now-rewire-later shape as wireIntoAudioGraph's pitchNode.
  */
-function createMasterLimiter(audioContext) {
-  const limiter = audioContext.createDynamicsCompressor();
-  limiter.threshold.value = -1;
-  limiter.knee.value = 0;
-  limiter.ratio.value = 20;
-  limiter.attack.value = 0.003;
-  limiter.release.value = 0.1;
-  const saturator = audioContext.createWaveShaper();
-  saturator.curve = buildSaturatorCurve();
-  saturator.oversample = "4x"; // reduces aliasing from the curve's nonlinearity -- cheap, and this stage only does real work on the rare peak it's there to catch
-  limiter.connect(saturator);
-  saturator.connect(audioContext.destination);
-  return limiter;
+function createMasterBus(audioContext, limiterReady) {
+  const masterGain = audioContext.createGain();
+  masterGain.connect(audioContext.destination);
+  limiterReady.then((limiterNode) => {
+    if (!limiterNode) return; // module failed to load -- stay on the direct fallback rather than breaking playback, matching wireIntoAudioGraph's own inert-fallback philosophy
+    masterGain.disconnect(audioContext.destination);
+    masterGain.connect(limiterNode);
+    limiterNode.connect(audioContext.destination);
+  });
+  return masterGain;
 }
 
 /** Binary search: index of the last word whose start <= t, or -1 before the first word. */
@@ -418,11 +407,17 @@ export function createPlaybackEngine() {
   const workletReady = audioContext
     ? audioContext.audioWorklet.addModule(new URL("./audio/pitch-shift-processor.js", import.meta.url)).catch(() => {})
     : Promise.resolve();
-  // Every source (both slots' dry signal and the shared reverb tail) routes
-  // through this single limiter rather than straight to destination -- see
-  // createMasterLimiter's doc comment for why that's needed even at default
-  // (unshifted, non-ducked) playback.
-  const masterOut = audioContext ? createMasterLimiter(audioContext) : null;
+  // Resolves to the constructed limiter AudioWorkletNode once its module's
+  // loaded, or null on failure/no Web Audio support -- see
+  // createMasterBus's doc comment for why every source routes through this
+  // even at default (unshifted, non-ducked, unboosted) playback.
+  const limiterReady = audioContext
+    ? audioContext.audioWorklet
+        .addModule(new URL("./audio/limiter-processor.js", import.meta.url))
+        .then(() => new AudioWorkletNode(audioContext, "limiter-processor", { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] }))
+        .catch(() => null)
+    : Promise.resolve(null);
+  const masterOut = audioContext ? createMasterBus(audioContext, limiterReady) : null;
   const reverbInput = audioContext ? createReverbNetwork(audioContext, masterOut) : null;
 
   // Two slots (today's "active"/"standby" elements), each a synced
