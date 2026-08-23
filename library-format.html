@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="pbe-site" content="karaoke">
+    <title>Personal Library Format — PBE Karaoke</title>
+    <link rel="stylesheet" href="assets/css/styles.css" />
+    <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
+    <meta name="theme-color" content="#0f6370" />
+    <script src="https://pbefocus.com/rogue-sheep.js" defer></script>
+    <script src="https://pbefocus.com/site-nav.js" defer></script>
+    <style>
+      .doc-panel pre {
+        margin: 0 0 1rem;
+        padding: 1rem 1.1rem;
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--teal-wash);
+        font-size: 0.85rem;
+        line-height: 1.5;
+      }
+      .doc-panel pre:last-child {
+        margin-bottom: 0;
+      }
+      .doc-panel code {
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      }
+      .doc-panel p code,
+      .doc-panel li code {
+        padding: 0.1em 0.35em;
+        border-radius: 4px;
+        background: var(--teal-wash);
+      }
+      .doc-panel table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 0 0 1rem;
+        font-size: 0.92rem;
+      }
+      .doc-panel th,
+      .doc-panel td {
+        text-align: left;
+        vertical-align: top;
+        padding: 0.5rem 0.6rem;
+        border-bottom: 1px solid var(--line);
+      }
+      .doc-panel th {
+        white-space: nowrap;
+      }
+      .doc-panel ul,
+      .doc-panel ol {
+        margin: 0 0 1rem;
+        padding-left: 1.3rem;
+        line-height: 1.55;
+      }
+      .doc-panel p {
+        line-height: 1.55;
+      }
+      .back-link {
+        display: inline-block;
+        margin: 0 auto 1.5rem;
+        max-width: 900px;
+      }
+      .back-link-wrap {
+        max-width: 900px;
+        margin: 0 auto 0.75rem;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href="https://pbefocus.com" aria-label="PBEfocus.com home">
+          <picture>
+            <source srcset="assets/pbefocus-logo-dark.png" media="(prefers-color-scheme: dark)">
+            <img src="assets/pbefocus-logo.png" alt="PBEfocus.com">
+          </picture>
+        </a>
+        <nav class="primary-nav" aria-label="Primary navigation">
+          <span data-pbe-site-nav style="display:contents">
+            <a href="https://pbefocus.com">Home</a>
+            <a href="/">Karaoke</a>
+          </span>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <div class="back-link-wrap">
+        <a class="back-link" href="index.html">&larr; Back to PBE Karaoke</a>
+      </div>
+
+      <section class="mission-statement">
+        <h1>Personal Library Format</h1>
+        <p>
+          PBE Karaoke ships with no song content at all. To study with it, you point it at a
+          <strong>library manifest</strong> — a JSON file describing your own already-cleared
+          recordings and the words/timing to sing along with them — plus the audio files that
+          manifest refers to. This page describes what that manifest and its accompanying audio
+          folder need to look like.
+        </p>
+      </section>
+
+      <section class="panel doc-panel">
+        <h2>Loading a Library</h2>
+        <p>Once you have a manifest and its audio files ready, the gate on the main page accepts them three ways:</p>
+        <ul>
+          <li>
+            <strong>Hosted URL</strong> — paste a link to the manifest JSON (or add
+            <code>?library=&lt;url&gt;</code> to the app's address). The audio files it points to
+            must be reachable at that same URL's host, over a server that supports HTTP Range
+            requests (virtually every static host does; see the app's <code>README.md</code> if
+            you're setting up your own).
+          </li>
+          <li>
+            <strong>Upload Manifest File…</strong> — pick a manifest JSON file straight from disk.
+            Handy for testing, or when someone hands you the file directly. It isn't remembered
+            between visits, so it needs re-uploading each time.
+          </li>
+          <li>
+            <strong>Load Local Folder…</strong> (Chrome/Edge only) or a shared OneDrive folder
+            link — point the app at a whole folder containing both the manifest and the audio
+            files, and it reads everything straight from there with no hosting required. See
+            "Folder Structure" below for exactly what that folder needs to contain.
+          </li>
+        </ul>
+      </section>
+
+      <section class="panel doc-panel">
+        <h2>Manifest Shape</h2>
+        <p>The manifest is a single JSON object with three top-level fields:</p>
+        <pre><code>{
+  "year": "2026-2027",
+  "styles": [ ... ],
+  "sections": [ ... ]
+}</code></pre>
+        <table>
+          <tr><th><code>year</code></th><td>Any string. Not shown in the UI — just a label for the manifest itself.</td></tr>
+          <tr><th><code>styles</code></th><td>The list of musical styles used anywhere in <code>sections</code>. See below.</td></tr>
+          <tr><th><code>sections</code></th><td>One entry per chapter (or verse range) you have recordings for. See below.</td></tr>
+        </table>
+      </section>
+
+      <section class="panel doc-panel">
+        <h2><code>styles</code></h2>
+        <pre><code>{
+  "id": "contemporarychristian",
+  "label": "Contemporary Christian",
+  "emoji": "🙏",
+  "churchFit": "great-match"
+}</code></pre>
+        <table>
+          <tr><th><code>id</code></th><td>Required. Short, stable, unique identifier — this is what each recording's <code>style</code> field points back to.</td></tr>
+          <tr><th><code>label</code></th><td>Required. Human-readable name shown in the style picker.</td></tr>
+          <tr><th><code>emoji</code></th><td>Optional. One vibe emoji shown next to the label.</td></tr>
+          <tr><th><code>churchFit</code></th><td>Optional. One of <code>"great-match"</code>, <code>"nervous"</code>, or <code>"very-uncomfortable"</code> — shown as a face icon. Leave it out if you'd rather not rate it; the app just shows the label.</td></tr>
+        </table>
+      </section>
+
+      <section class="panel doc-panel">
+        <h2><code>sections</code> &amp; <code>recordings</code></h2>
+        <p>Each section covers one chapter, or one verse range within a chapter, and lists every recording available for it:</p>
+        <pre><code>{
+  "book": "Mark",
+  "chapter": 6,
+  "verseStart": 30,
+  "verseEnd": 56,
+  "recordings": [
+    {
+      "style": "contemporarychristian",
+      "take": 1,
+      "instrumentalUrl": "Mark 6_30-56 (1).instrumental.m4a",
+      "vocalUrl": "Mark 6_30-56 (1).vocal.m4a",
+      "words": [
+        { "word": "Now", "start": 0.42, "end": 0.71, "verse": 30 },
+        { "word": "the", "start": 0.71, "end": 0.85, "verse": 30 },
+        { "word": "apostles", "start": 0.85, "end": 1.38, "verse": 30 }
+      ]
+    }
+  ]
+}</code></pre>
+        <table>
+          <tr><th><code>book</code></th><td>Book name exactly as it should be displayed and grouped in the passage picker.</td></tr>
+          <tr><th><code>chapter</code></th><td>Chapter number.</td></tr>
+          <tr><th><code>verseStart</code> / <code>verseEnd</code></th><td>Optional. Omit both (or set to <code>null</code>) for a whole-chapter section.</td></tr>
+          <tr><th><code>recordings</code></th><td>At least one recording, described below. A section can have several — different styles, or multiple takes of the same style.</td></tr>
+        </table>
+        <p>Each entry in <code>recordings</code>:</p>
+        <table>
+          <tr><th><code>style</code></th><td>Must match one of the top-level <code>styles[].id</code> values.</td></tr>
+          <tr><th><code>take</code></th><td>A number distinguishing alternate recordings of the same section+style. Any distinct numbers work — they don't need to start at 1 or be contiguous.</td></tr>
+          <tr><th><code>instrumentalUrl</code> / <code>vocalUrl</code></th><td>
+            Two separate audio files for the <em>same</em> recording — one with vocals removed, one
+            with just the vocals — rather than a single mixed track. The app always plays both
+            together and fades only the vocal track in and out, so the two files must be the same
+            length and stay in sync. Any browser-playable audio format works (e.g. mp3, m4a, wav).
+            See "Folder Structure" below for what these paths should look like.
+          </td></tr>
+          <tr><th><code>words</code></th><td>Word-by-word timing for this specific recording, described below.</td></tr>
+        </table>
+      </section>
+
+      <section class="panel doc-panel">
+        <h2><code>words</code></h2>
+        <p>An ordered array covering every word in the recording, used to drive the karaoke highlight, the blanking/recall study modes, and Type Ahead/Sing-Along scoring:</p>
+        <pre><code>{ "word": "apostles", "start": 0.85, "end": 1.38, "verse": 30 }</code></pre>
+        <table>
+          <tr><th><code>word</code></th><td>The word as it should be displayed.</td></tr>
+          <tr><th><code>start</code> / <code>end</code></th><td>Seconds into <em>this recording's own audio files</em> (not the section, not a global clock) when the word is sung.</td></tr>
+          <tr><th><code>verse</code></th><td>
+            The verse number this word belongs to. Use <code>null</code> for words that aren't part
+            of the scripture text itself (a spoken intro, an ad-lib, filler) — those play normally
+            but are excluded from study/scoring and from the verse picker.
+          </td></tr>
+        </table>
+      </section>
+
+      <section class="panel doc-panel">
+        <h2>Folder Structure (Local Folder / OneDrive Folder)</h2>
+        <p>
+          For a hosted URL, folder layout doesn't matter — only that <code>instrumentalUrl</code>
+          and <code>vocalUrl</code> are correct, reachable URLs. For "Load Local Folder…" or a
+          shared OneDrive folder link, the app reads relative to whatever single folder you point
+          it at, so that folder needs a specific shape:
+        </p>
+        <ul>
+          <li>The manifest file must sit at the <strong>root</strong> of that folder, named exactly <code>manifest.local.json</code>.</li>
+          <li>
+            Every <code>instrumentalUrl</code>/<code>vocalUrl</code> in the manifest must be a path
+            relative to that same root (forward slashes, subfolders allowed) pointing to a file that
+            actually exists there.
+          </li>
+        </ul>
+        <p>For example, a folder organized by style:</p>
+        <pre><code>My Library/
+├── manifest.local.json
+├── Contemporary Christian/
+│   ├── Mark 6_30-56 (1).instrumental.m4a
+│   └── Mark 6_30-56 (1).vocal.m4a
+└── Broadway/
+    ├── Mark 6_30-56 (1).instrumental.m4a
+    └── Mark 6_30-56 (1).vocal.m4a</code></pre>
+        <p>would need the matching recording entry to read:</p>
+        <pre><code>"instrumentalUrl": "Contemporary Christian/Mark 6_30-56 (1).instrumental.m4a",
+"vocalUrl": "Contemporary Christian/Mark 6_30-56 (1).vocal.m4a"</code></pre>
+        <p>
+          Any folder layout works as long as the paths line up — a single flat folder of audio
+          files is just as valid as one organized by style or by book.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>
