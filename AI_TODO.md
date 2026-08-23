@@ -28,29 +28,38 @@ there's no *actual* prior-version data to protect here either.)
 
 ---
 
-## 13. [ ] Google Drive folder-link library source — code done, blocked on a real API key + real-browser verification
+## 13. [ ] Google Drive folder-link library source — code done and confirmed working against live data; only a real-browser click-through is left
 
 **Status:** implemented and unit-tested (`assets/js/offline/googledrive-library.js`,
 wired into `assets/js/gate.js`/`assets/js/main.js`, documented in
 `PBE_2026_2027/AGENTS.md`'s "Google Drive folder-link library source"
 section, 9 passing tests in `tests/googledrive-library.test.mjs`). A real,
-restricted API key is now in `GOOGLE_API_KEY`. **Not yet removable per
-this file's own rule 3** — it still hasn't been verified in a real
-browser. Google doesn't allow `localhost` as an HTTP referrer restriction,
-so this can only be tested from the actual deployed site
-(`https://karaoke.pbefocus.com`), not local dev.
+restricted API key is live in `GOOGLE_API_KEY` and the branch is deployed.
 
-**What's still an open question, not yet resolved:** whether `alt=media`
-file *downloads* (not just `files.list`/`files.get` metadata) actually
-work with just the API key against a folder shared "Anyone with the
-link" — the research behind this item found strong evidence for
-metadata/listing access working key-only, and expects content reads to
-work the same way (children inherit the folder's public-read
-permission), but this was never confirmed against a live share. If it
-turns out downloads need OAuth after all, this source needs to fall back
-to OneDrive's per-Pathfinder-sign-in shape instead — a real rewrite, not
-a tweak. **This is the one thing to check first** once a key exists,
-before spending more time on it.
+**The one open technical question is now resolved, with live data, not
+just research:** whether `alt=media` file downloads (not just
+`files.list`/`files.get` metadata) work with just the API key against a
+folder shared "Anyone with the link." Confirmed directly against a real
+test folder (`PBE Test`, shared by the Pathfinder/developer) two ways —
+raw `curl` requests with a spoofed `Referer` matching the deployed site,
+and (more decisively) running the actual shipped module against the live
+folder over a real network connection, with only Cache Storage/
+localStorage faked (Node has no browser APIs) and `fetch` wrapped to
+supply the same `Referer` a real browser sends automatically. Both
+confirm: folder walk (457 files indexed), manifest read + validation (4
+styles, 38 sections), and `primeResolverCache`/`resolveUrlSync` caching a
+real recording pair to `blob:` URLs all work end-to-end, key-only. Also
+confirmed along the way: `alt=media` honors `Range` requests (HTTP 206),
+which matters for actual playback/seeking, not just a full download. No
+OAuth fallback needed — the original worst-case risk in this item didn't
+materialize.
+
+**Only remaining step before this is removable per this file's own rule
+3:** an actual browser click-through — paste the test folder's share
+link into the gate at `https://karaoke.pbefocus.com` and confirm it
+unlocks and plays. Everything the code needs to do that has already been
+verified; this is now about the gate's DOM wiring/UX, not the Drive
+integration itself.
 
 **To finish this item:** create the API key (AGENTS.md's setup steps),
 paste it into `GOOGLE_API_KEY`, share a real test folder (containing a
