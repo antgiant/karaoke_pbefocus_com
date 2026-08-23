@@ -28,55 +28,9 @@ there's no *actual* prior-version data to protect here either.)
 
 ---
 
-## 14. [ ] Dropbox folder-link library source
-
-**Goal:** same pattern again: paste a Dropbox shared-folder link into the
-gate and read the manifest + audio from it.
-
-**Login — needs to be decided before implementing, not guessed:** Dropbox
-has no anonymous, credential-free API for walking a shared folder's
-contents. Two real options, and they trade off differently from the
-OneDrive/Google Drive sources above:
-- **App-owned token (recommended to investigate first):** register one
-  Dropbox app for this project and generate a single long-lived access
-  token under *your* Dropbox account once, ship no user-facing login at
-  all. Dropbox's sharing endpoints (e.g. resolving a shared link's
-  metadata and listing/downloading its contents) accept a shared-link URL
-  as an argument regardless of which account created the link, so one
-  token you control should be able to read *any* Pathfinder's "anyone with
-  the link" folder without them signing in to anything. This would make
-  Dropbox the only one of the three with truly zero Pathfinder-facing
-  login — confirm this against Dropbox's current Sharing API docs
-  (`developers.dropbox.com/dbx-sharing-guide`) before committing to it,
-  since it wasn't verified end-to-end against a live folder in this
-  research pass.
-- **Per-Pathfinder OAuth (fallback if the above doesn't pan out):** same
-  shape as the OneDrive source — each Pathfinder signs in with their own
-  free Dropbox account via Dropbox's browser OAuth flow, no backend
-  needed.
-- A raw `?dl=1` direct-download link (no API/app registration at all) was
-  also considered and rejected as the primary mechanism: it forces a
-  whole-folder `.zip` download rather than per-file access, sources
-  disagree on the size cap (1 GB vs. 250 GB turned up in different
-  places), and it can't do the incremental per-recording fetch-and-cache
-  this app relies on (`offline/audio-cache.js`). It may still be worth a
-  per-*file* direct link as the actual audio-byte fetch once a file's
-  path is known via the API, mirroring how OneDrive's Graph-minted
-  download URLs are used only at play time, not for bulk fetching.
-
-**Quota:** Dropbox rate-limits per authorizing access token, not with
-fixed published numbers (their guide describes limits as dynamic/
-per-authorization, growing with usage over time) — so if the app-owned-
-token approach above pans out, *every* Pathfinder's traffic shares one
-token's budget, same shared-ceiling caveat as the Google Drive source
-above, and worth load-testing before relying on it for a live group
-session rather than assuming headroom.
-
-**Relevant files:** `assets/js/gate.js`, `assets/js/constants.js`, a new
-`assets/js/offline/dropbox-library.js` modeled on
-`assets/js/offline/onedrive-library.js`, `PBE_2026_2027/AGENTS.md`.
-
-**Open question:** app-owned token vs. per-Pathfinder OAuth (above) needs
-an answer — from Dropbox's actual current docs/a real test, not
-assumption — before writing the folder-walk code, since it changes both
-the login UX and which quota bucket applies.
+Nothing queued right now — Google Drive and OneDrive folder-link sources
+are done; Dropbox was considered and deliberately dropped (Dropbox retired
+indefinite access tokens in 2021, has no origin-restriction mechanism for
+credentials the way Google's API key does, and per-Pathfinder OAuth would
+just duplicate the OneDrive login step) — not worth the added surface for
+a third source.
