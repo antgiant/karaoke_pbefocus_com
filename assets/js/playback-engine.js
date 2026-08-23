@@ -42,8 +42,8 @@ function semitonesToRatio(semitones) {
   return Math.pow(2, semitones / 12);
 }
 
-/** Builds the shared reverb/echo send network for one AudioContext: a delay line with feedback for a repeating tail, plus an input gain every source's wet send connects into and an output already wired to destination. */
-function createReverbNetwork(audioContext) {
+/** Builds the shared reverb/echo send network for one AudioContext: a delay line with feedback for a repeating tail, plus an input gain every source's wet send connects into and an output already wired to `masterOut` (see createMasterLimiter). */
+function createReverbNetwork(audioContext, masterOut) {
   const input = audioContext.createGain();
   const delay = audioContext.createDelay(1);
   delay.delayTime.value = REVERB_DELAY_SECONDS;
@@ -52,8 +52,31 @@ function createReverbNetwork(audioContext) {
   input.connect(delay);
   delay.connect(feedback);
   feedback.connect(delay);
-  delay.connect(audioContext.destination);
+  delay.connect(masterOut);
   return input;
+}
+
+/**
+ * Every recording's instrumental+vocal stems are separated (and each
+ * individually loudness-rescaled) by scripts/separate_stems.py, which has
+ * no way to know the two will be summed back together at full volume on
+ * playback (see the file-top comment) -- so a stem pair that's each
+ * individually just under 0dBFS can clip once mixed, and two overlapping
+ * blocks during a crossfade raise that risk further. A DynamicsCompressorNode
+ * with a near-0dB threshold and a fast attack acts as a transparent peak
+ * limiter for the rare/loud moment that'd otherwise clip, rather than a
+ * musical compressor shaping normal playback -- everything already under
+ * the threshold passes through essentially unchanged.
+ */
+function createMasterLimiter(audioContext) {
+  const limiter = audioContext.createDynamicsCompressor();
+  limiter.threshold.value = -1;
+  limiter.knee.value = 0;
+  limiter.ratio.value = 20;
+  limiter.attack.value = 0.003;
+  limiter.release.value = 0.1;
+  limiter.connect(audioContext.destination);
+  return limiter;
 }
 
 /** Binary search: index of the last word whose start <= t, or -1 before the first word. */
@@ -185,7 +208,7 @@ export function seekReliably(el, time) {
  * no-op) if the browser has no Web Audio support at all -- pitch
  * shift/reverb just don't do anything rather than breaking playback.
  */
-function wireIntoAudioGraph(el, audioContext, workletReady, reverbInput) {
+function wireIntoAudioGraph(el, audioContext, workletReady, reverbInput, masterOut) {
   if (!audioContext) return null;
   const sourceNode = audioContext.createMediaElementSource(el);
   const wetGain = audioContext.createGain();
@@ -193,7 +216,7 @@ function wireIntoAudioGraph(el, audioContext, workletReady, reverbInput) {
   wetGain.connect(reverbInput);
   let pitchNode = null;
   let pendingPitchFactor = 1; // set(...) before the worklet's ready -- applied the instant it is, see below
-  sourceNode.connect(audioContext.destination);
+  sourceNode.connect(masterOut);
   sourceNode.connect(wetGain);
 
   workletReady.then(() => {
@@ -202,10 +225,10 @@ function wireIntoAudioGraph(el, audioContext, workletReady, reverbInput) {
       numberOfOutputs: 1,
       outputChannelCount: [2],
     });
-    sourceNode.disconnect(audioContext.destination);
+    sourceNode.disconnect(masterOut);
     sourceNode.disconnect(wetGain);
     sourceNode.connect(pitchNode);
-    pitchNode.connect(audioContext.destination);
+    pitchNode.connect(masterOut);
     pitchNode.connect(wetGain);
     if (pendingPitchFactor !== 1) pitchNode.port.postMessage({ pitchFactor: pendingPitchFactor });
   });
@@ -222,7 +245,7 @@ function wireIntoAudioGraph(el, audioContext, workletReady, reverbInput) {
 }
 
 /** A synced instrumental+vocal pair -- every block plays through one of these (see the file-top comment). Normally both elements play at the same volume (envelopeVolume); a caller that's set a duck predicate additionally scales the vocal element by duckFactor, faded toward its target over DUCK_TIME_CONSTANT_SECONDS. Timing (word-level ducking) is driven by the block's own recording.words, since both stems share the original recording's word timing. */
-function makeSource(audioContext, workletReady, reverbInput) {
+function makeSource(audioContext, workletReady, reverbInput, masterOut) {
   const instrumentalEl = new Audio();
   const vocalEl = new Audio();
   instrumentalEl.preload = "auto";
@@ -246,8 +269,8 @@ function makeSource(audioContext, workletReady, reverbInput) {
     vocalEl.volume = envelopeVolume * duckFactor * vocalTrackVolume;
   }
 
-  const instrumentalGraph = wireIntoAudioGraph(instrumentalEl, audioContext, workletReady, reverbInput);
-  const vocalGraph = wireIntoAudioGraph(vocalEl, audioContext, workletReady, reverbInput);
+  const instrumentalGraph = wireIntoAudioGraph(instrumentalEl, audioContext, workletReady, reverbInput, masterOut);
+  const vocalGraph = wireIntoAudioGraph(vocalEl, audioContext, workletReady, reverbInput, masterOut);
 
   return {
     get src() {
@@ -360,11 +383,16 @@ export function createPlaybackEngine() {
   const workletReady = audioContext
     ? audioContext.audioWorklet.addModule(new URL("./audio/pitch-shift-processor.js", import.meta.url)).catch(() => {})
     : Promise.resolve();
-  const reverbInput = audioContext ? createReverbNetwork(audioContext) : null;
+  // Every source (both slots' dry signal and the shared reverb tail) routes
+  // through this single limiter rather than straight to destination -- see
+  // createMasterLimiter's doc comment for why that's needed even at default
+  // (unshifted, non-ducked) playback.
+  const masterOut = audioContext ? createMasterLimiter(audioContext) : null;
+  const reverbInput = audioContext ? createReverbNetwork(audioContext, masterOut) : null;
 
   // Two slots (today's "active"/"standby" elements), each a synced
   // instrumental+vocal pair -- see makeSource().
-  const slots = [makeSource(audioContext, workletReady, reverbInput), makeSource(audioContext, workletReady, reverbInput)];
+  const slots = [makeSource(audioContext, workletReady, reverbInput, masterOut), makeSource(audioContext, workletReady, reverbInput, masterOut)];
 
   let activeIdx = 0;
   let program = { blocks: [] };
