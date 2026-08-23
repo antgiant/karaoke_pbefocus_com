@@ -56,17 +56,48 @@ function createReverbNetwork(audioContext, masterOut) {
   return input;
 }
 
+// Below SATURATOR_KNEE, buildSaturatorCurve is exactly transparent (y = x);
+// above it, output eases asymptotically toward SATURATOR_KNEE + (1 -
+// SATURATOR_KNEE) * tanh(1) (~0.976, about -0.2dBFS) no matter how far
+// above 1 the input goes -- WaveShaperNode clamps any input outside [-1, 1]
+// to the curve's own endpoint sample, so that asymptote is a hard ceiling
+// on the node's output, not just a shape.
+const SATURATOR_KNEE = 0.9;
+const SATURATOR_CURVE_SAMPLES = 4096;
+
+/** A per-sample soft-clip curve for createMasterLimiter's final safety stage -- see that function's doc comment for why a curve (zero-latency, can't overshoot) rather than another dynamics stage. */
+function buildSaturatorCurve() {
+  const curve = new Float32Array(SATURATOR_CURVE_SAMPLES);
+  for (let i = 0; i < SATURATOR_CURVE_SAMPLES; i++) {
+    const x = (i / (SATURATOR_CURVE_SAMPLES - 1)) * 2 - 1;
+    const ax = Math.abs(x);
+    if (ax <= SATURATOR_KNEE) {
+      curve[i] = x;
+    } else {
+      const sign = Math.sign(x);
+      const t = (ax - SATURATOR_KNEE) / (1 - SATURATOR_KNEE);
+      curve[i] = sign * (SATURATOR_KNEE + (1 - SATURATOR_KNEE) * Math.tanh(t));
+    }
+  }
+  return curve;
+}
+
 /**
  * Every recording's instrumental+vocal stems are separated (and each
  * individually loudness-rescaled) by scripts/separate_stems.py, which has
  * no way to know the two will be summed back together at full volume on
  * playback (see the file-top comment) -- so a stem pair that's each
  * individually just under 0dBFS can clip once mixed, and two overlapping
- * blocks during a crossfade raise that risk further. A DynamicsCompressorNode
- * with a near-0dB threshold and a fast attack acts as a transparent peak
- * limiter for the rare/loud moment that'd otherwise clip, rather than a
- * musical compressor shaping normal playback -- everything already under
- * the threshold passes through essentially unchanged.
+ * blocks during a crossfade raise that risk further. Two stages in series:
+ * a DynamicsCompressorNode with a near-0dB threshold and a fast attack
+ * handles sustained loudness smoothly, but its attack time (however fast)
+ * is still nonzero, so a genuinely sharp transient (a hit consonant, a
+ * downbeat) can punch through in the instant before gain reduction
+ * engages -- confirmed in practice: the compressor alone made clipping
+ * rare rather than eliminating it. A WaveShaperNode has no attack/release
+ * at all (a static per-sample curve, not a dynamics process), so it can't
+ * be outrun by a transient the way the compressor can -- see
+ * buildSaturatorCurve for why its ceiling is a hard one.
  */
 function createMasterLimiter(audioContext) {
   const limiter = audioContext.createDynamicsCompressor();
@@ -75,7 +106,11 @@ function createMasterLimiter(audioContext) {
   limiter.ratio.value = 20;
   limiter.attack.value = 0.003;
   limiter.release.value = 0.1;
-  limiter.connect(audioContext.destination);
+  const saturator = audioContext.createWaveShaper();
+  saturator.curve = buildSaturatorCurve();
+  saturator.oversample = "4x"; // reduces aliasing from the curve's nonlinearity -- cheap, and this stage only does real work on the rare peak it's there to catch
+  limiter.connect(saturator);
+  saturator.connect(audioContext.destination);
   return limiter;
 }
 
