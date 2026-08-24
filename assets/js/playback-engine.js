@@ -210,24 +210,31 @@ export function seekReliably(el, time) {
 
 /**
  * Wires one <audio> element into `audioContext`'s graph for true pitch
- * shift (AI_TODO.md item 4): source -> SoundTouchNode (vendored, see
+ * shift (AI_TODO.md item 4): source -> pitch node (vendored, see
  * vendor/soundtouch/) -> trackGain -> [dry: masterOut] + [wet: reverbInput,
  * the shared echo/reverb send]. Envelope/duck/track-balance volume
  * (makeSource's applyVolumes) goes through trackGain's AudioParam rather
  * than the element's own .volume -- see trackGain's own doc comment below
  * for why.
  *
- * The pitch-shift node can't be created until the vendored SoundTouch
- * AudioWorkletProcessor has finished loading (audioWorklet.addModule is
- * async, done once for the whole engine -- see createPlaybackEngine). Until
- * then this connects the element straight to destination/the reverb send
- * (pitch shift is simply inert -- effectively pitchSemitones=0 -- for
- * whatever's already playing when the app first loads) and rewires itself
- * once the module resolves. Returns null (every method below becomes a
- * no-op) if the browser has no Web Audio support at all -- pitch
- * shift/reverb just don't do anything rather than breaking playback.
+ * `useFormantCorrection` picks which vendored pitch node this element gets:
+ * plain `SoundTouchNode` (instrumental), or `FormantCorrectionNode`
+ * (vocal) -- the latter's LPC-based formant preservation keeps a shifted
+ * voice sounding like a voice instead of "chipmunking" at larger shifts,
+ * something formants only apply to in the first place, so the instrumental
+ * stem has no use for the extra CPU cost. See makeSource's call site.
+ *
+ * The pitch node can't be created until its vendored AudioWorkletProcessor
+ * has finished loading (audioWorklet.addModule is async, done once per
+ * processor for the whole engine -- see createPlaybackEngine). Until then
+ * this connects the element straight to destination/the reverb send (pitch
+ * shift is simply inert -- effectively pitchSemitones=0 -- for whatever's
+ * already playing when the app first loads) and rewires itself once the
+ * module resolves. Returns null (every method below becomes a no-op) if
+ * the browser has no Web Audio support at all -- pitch shift/reverb just
+ * don't do anything rather than breaking playback.
  */
-function wireIntoAudioGraph(el, audioContext, workletReady, reverbInput, masterOut) {
+function wireIntoAudioGraph(el, audioContext, workletReady, reverbInput, masterOut, useFormantCorrection) {
   if (!audioContext) return null;
   const sourceNode = audioContext.createMediaElementSource(el);
   // Envelope/duck/track-balance volume (makeSource's applyVolumes) is
@@ -255,16 +262,19 @@ function wireIntoAudioGraph(el, audioContext, workletReady, reverbInput, masterO
   let pendingPitchSemitones = 0; // set(...) before the worklet's ready -- applied the instant it is, see below
   sourceNode.connect(trackGain);
 
-  // SoundTouchNode is imported dynamically, not statically at file-top,
-  // because `class SoundTouchNode extends AudioWorkletNode` (in the
-  // vendored module) evaluates the global `AudioWorkletNode` the instant
-  // the module loads -- a static top-level import would crash under the
-  // test suite's jsdom environment, which has no AudioWorkletNode, even
-  // though this callback itself only ever runs (see the `if (!audioContext)
-  // return null` guard above) when a real browser AudioContext exists.
+  // The pitch node class is imported dynamically, not statically at
+  // file-top, because `class ... extends AudioWorkletNode` (in the vendored
+  // module) evaluates the global `AudioWorkletNode` the instant the module
+  // loads -- a static top-level import would crash under the test suite's
+  // jsdom environment, which has no AudioWorkletNode, even though this
+  // callback itself only ever runs (see the `if (!audioContext) return
+  // null` guard above) when a real browser AudioContext exists.
   workletReady.then(async () => {
-    const { SoundTouchNode } = await import("./vendor/soundtouch/SoundTouchNode.js");
-    pitchNode = new SoundTouchNode({ context: audioContext });
+    const PitchNodeClass = useFormantCorrection
+      ? (await import("./vendor/soundtouch/formant-correction/FormantCorrectionNode.js")).FormantCorrectionNode
+      : (await import("./vendor/soundtouch/SoundTouchNode.js")).SoundTouchNode;
+    pitchNode = new PitchNodeClass({ context: audioContext });
+    if (useFormantCorrection) pitchNode.formantStrength.value = 1; // full correction -- see this function's doc comment
     sourceNode.disconnect(trackGain);
     sourceNode.connect(pitchNode);
     pitchNode.connect(trackGain);
@@ -286,7 +296,7 @@ function wireIntoAudioGraph(el, audioContext, workletReady, reverbInput, masterO
 }
 
 /** A synced instrumental+vocal pair -- every block plays through one of these (see the file-top comment). Normally both elements play at the same volume (envelopeVolume); a caller that's set a duck predicate additionally scales the vocal element by duckFactor, faded toward its target over DUCK_TIME_CONSTANT_SECONDS. Timing (word-level ducking) is driven by the block's own recording.words, since both stems share the original recording's word timing. */
-function makeSource(audioContext, workletReady, reverbInput, masterOut) {
+function makeSource(audioContext, soundtouchWorkletReady, formantWorkletReady, reverbInput, masterOut) {
   const instrumentalEl = new Audio();
   const vocalEl = new Audio();
   instrumentalEl.preload = "auto";
@@ -305,8 +315,8 @@ function makeSource(audioContext, workletReady, reverbInput, masterOut) {
   let instrumentalTrackVolume = 1;
   let vocalTrackVolume = 1;
 
-  const instrumentalGraph = wireIntoAudioGraph(instrumentalEl, audioContext, workletReady, reverbInput, masterOut);
-  const vocalGraph = wireIntoAudioGraph(vocalEl, audioContext, workletReady, reverbInput, masterOut);
+  const instrumentalGraph = wireIntoAudioGraph(instrumentalEl, audioContext, soundtouchWorkletReady, reverbInput, masterOut, false);
+  const vocalGraph = wireIntoAudioGraph(vocalEl, audioContext, formantWorkletReady, reverbInput, masterOut, true);
 
   // Prefer each graph's GainNode (see wireIntoAudioGraph's doc comment on
   // why -- Safari specifically doesn't tolerate frequent .volume writes on
@@ -417,7 +427,7 @@ function makeSource(audioContext, workletReady, reverbInput, masterOut) {
 }
 
 export function createPlaybackEngine() {
-  // One AudioContext (and its pitch-shift AudioWorklet module + shared
+  // One AudioContext (and its pitch-shift AudioWorklet modules + shared
   // reverb send) for the whole engine, both slots' sources routed through
   // it -- see wireIntoAudioGraph/createReverbNetwork. Constructed
   // defensively: a browser with no Web Audio support at all just gets inert
@@ -430,8 +440,16 @@ export function createPlaybackEngine() {
   } catch {
     audioContext = null;
   }
-  const workletReady = audioContext
+  // Two separate pitch-shift processors -- see wireIntoAudioGraph's doc
+  // comment on useFormantCorrection for why the instrumental and vocal
+  // stems use different ones.
+  const soundtouchWorkletReady = audioContext
     ? audioContext.audioWorklet.addModule(new URL("./vendor/soundtouch/soundtouch-processor.js", import.meta.url)).catch(() => {})
+    : Promise.resolve();
+  const formantWorkletReady = audioContext
+    ? audioContext.audioWorklet
+        .addModule(new URL("./vendor/soundtouch/formant-correction/formant-correction-processor.js", import.meta.url))
+        .catch(() => {})
     : Promise.resolve();
   // Resolves to the constructed limiter AudioWorkletNode once its module's
   // loaded, or null on failure/no Web Audio support -- see
@@ -448,7 +466,10 @@ export function createPlaybackEngine() {
 
   // Two slots (today's "active"/"standby" elements), each a synced
   // instrumental+vocal pair -- see makeSource().
-  const slots = [makeSource(audioContext, workletReady, reverbInput, masterOut), makeSource(audioContext, workletReady, reverbInput, masterOut)];
+  const slots = [
+    makeSource(audioContext, soundtouchWorkletReady, formantWorkletReady, reverbInput, masterOut),
+    makeSource(audioContext, soundtouchWorkletReady, formantWorkletReady, reverbInput, masterOut),
+  ];
 
   let activeIdx = 0;
   let program = { blocks: [] };
