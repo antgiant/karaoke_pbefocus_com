@@ -1,8 +1,8 @@
 // AudioWorkletProcessor implementing a lookahead peak limiter -- the final
 // stage of playback-engine.js's shared master bus (see createMasterBus).
-// Not an ES module, same reasoning as pitch-shift-processor.js's file-top
-// comment: AudioWorklet's addModule() loads this as its own worklet-global
-// script, so it stays a plain classic script like the rest of this
+// Not an ES module -- AudioWorklet's addModule() loads this as its own
+// worklet-global script (registerProcessor is a worklet-global, not an
+// import), so it stays a plain classic script like the rest of this
 // no-build-step app's non-module files.
 //
 // Exists because the two instrumental/vocal stems for a recording are

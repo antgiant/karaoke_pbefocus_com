@@ -63,11 +63,6 @@ export function resolveKaraokeControls(appDefault, playlistOverride, sectionOver
   return { ...appDefault, ...(playlistOverride ?? {}), ...(sectionOverride ?? {}) };
 }
 
-/** Equal-temperament frequency ratio for a pitch shift of `semitones` -- what playback-engine.js's pitch-shift worklet actually takes as its grain-read-rate multiplier. */
-export function semitonesToRatio(semitones) {
-  return Math.pow(2, semitones / 12);
-}
-
 /**
  * Groups a section's canonical words by verse number, in first-appearance
  * order, giving each verse's canonical index range -- verse (and "whole

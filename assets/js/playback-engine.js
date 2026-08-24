@@ -37,11 +37,6 @@ const NEUTRAL_CONTROLS = { pitchSemitones: 0, rate: 1, keyLock: true, countInSec
 const REVERB_DELAY_SECONDS = 0.18;
 const REVERB_FEEDBACK = 0.35;
 
-/** Equal-temperament frequency ratio for a pitch shift of `semitones` -- duplicated from karaoke-controls.js deliberately (see that file) so this module has no dependency on the settings-model layer, matching its existing settings-model-agnostic design (c.f. setVocalDuckPredicate). */
-function semitonesToRatio(semitones) {
-  return Math.pow(2, semitones / 12);
-}
-
 /** Builds the shared reverb/echo send network for one AudioContext: a delay line with feedback for a repeating tail, plus an input gain every source's wet send connects into and an output already wired to `masterOut` (see createMasterBus). */
 function createReverbNetwork(audioContext, masterOut) {
   const input = audioContext.createGain();
@@ -215,13 +210,14 @@ export function seekReliably(el, time) {
 
 /**
  * Wires one <audio> element into `audioContext`'s graph for true pitch
- * shift (AI_TODO.md item 4): source -> pitch-shift AudioWorkletNode ->
- * trackGain -> [dry: masterOut] + [wet: reverbInput, the shared echo/reverb
- * send]. Envelope/duck/track-balance volume (makeSource's applyVolumes)
- * goes through trackGain's AudioParam rather than the element's own
- * .volume -- see trackGain's own doc comment below for why.
+ * shift (AI_TODO.md item 4): source -> SoundTouchNode (vendored, see
+ * vendor/soundtouch/) -> trackGain -> [dry: masterOut] + [wet: reverbInput,
+ * the shared echo/reverb send]. Envelope/duck/track-balance volume
+ * (makeSource's applyVolumes) goes through trackGain's AudioParam rather
+ * than the element's own .volume -- see trackGain's own doc comment below
+ * for why.
  *
- * The pitch-shift node can't be created until pitch-shift-processor.js's
+ * The pitch-shift node can't be created until the vendored SoundTouch
  * AudioWorkletProcessor has finished loading (audioWorklet.addModule is
  * async, done once for the whole engine -- see createPlaybackEngine). Until
  * then this connects the element straight to destination/the reverb send
@@ -256,25 +252,29 @@ function wireIntoAudioGraph(el, audioContext, workletReady, reverbInput, masterO
   trackGain.connect(wetGain);
   wetGain.connect(reverbInput);
   let pitchNode = null;
-  let pendingPitchFactor = 1; // set(...) before the worklet's ready -- applied the instant it is, see below
+  let pendingPitchSemitones = 0; // set(...) before the worklet's ready -- applied the instant it is, see below
   sourceNode.connect(trackGain);
 
-  workletReady.then(() => {
-    pitchNode = new AudioWorkletNode(audioContext, "pitch-shift-processor", {
-      numberOfInputs: 1,
-      numberOfOutputs: 1,
-      outputChannelCount: [2],
-    });
+  // SoundTouchNode is imported dynamically, not statically at file-top,
+  // because `class SoundTouchNode extends AudioWorkletNode` (in the
+  // vendored module) evaluates the global `AudioWorkletNode` the instant
+  // the module loads -- a static top-level import would crash under the
+  // test suite's jsdom environment, which has no AudioWorkletNode, even
+  // though this callback itself only ever runs (see the `if (!audioContext)
+  // return null` guard above) when a real browser AudioContext exists.
+  workletReady.then(async () => {
+    const { SoundTouchNode } = await import("./vendor/soundtouch/SoundTouchNode.js");
+    pitchNode = new SoundTouchNode({ context: audioContext });
     sourceNode.disconnect(trackGain);
     sourceNode.connect(pitchNode);
     pitchNode.connect(trackGain);
-    if (pendingPitchFactor !== 1) pitchNode.port.postMessage({ pitchFactor: pendingPitchFactor });
+    if (pendingPitchSemitones !== 0) pitchNode.pitchSemitones.value = pendingPitchSemitones;
   });
 
   return {
-    setPitchFactor(ratio) {
-      pendingPitchFactor = ratio;
-      pitchNode?.port.postMessage({ pitchFactor: ratio });
+    setPitchSemitones(semitones) {
+      pendingPitchSemitones = semitones;
+      if (pitchNode) pitchNode.pitchSemitones.value = semitones;
     },
     setReverbAmount(amount) {
       wetGain.gain.value = amount;
@@ -406,9 +406,8 @@ function makeSource(audioContext, workletReady, reverbInput, masterOut) {
         el.mozPreservesPitch = keyLock; // legacy Firefox
         el.webkitPreservesPitch = keyLock; // legacy Safari/WebKit
       }
-      const ratio = semitonesToRatio(pitchSemitones);
-      instrumentalGraph?.setPitchFactor(ratio);
-      vocalGraph?.setPitchFactor(ratio);
+      instrumentalGraph?.setPitchSemitones(pitchSemitones);
+      vocalGraph?.setPitchSemitones(pitchSemitones);
     },
     setReverbAmount(amount) {
       instrumentalGraph?.setReverbAmount(amount);
@@ -432,7 +431,7 @@ export function createPlaybackEngine() {
     audioContext = null;
   }
   const workletReady = audioContext
-    ? audioContext.audioWorklet.addModule(new URL("./audio/pitch-shift-processor.js", import.meta.url)).catch(() => {})
+    ? audioContext.audioWorklet.addModule(new URL("./vendor/soundtouch/soundtouch-processor.js", import.meta.url)).catch(() => {})
     : Promise.resolve();
   // Resolves to the constructed limiter AudioWorkletNode once its module's
   // loaded, or null on failure/no Web Audio support -- see

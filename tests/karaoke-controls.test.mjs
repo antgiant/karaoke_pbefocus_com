@@ -4,7 +4,6 @@ import {
   defaultKaraokeControls,
   clampKaraokeControls,
   resolveKaraokeControls,
-  semitonesToRatio,
   loopRangeForCanonicalIndices,
   verseRangesForSection,
   KARAOKE_CONTROLS_LIMITS,
@@ -57,18 +56,6 @@ test("clampKaraokeControls: leaves fields not present in the partial untouched (
 
 test("clampKaraokeControls: a value already in range is unchanged", () => {
   assert.deepEqual(clampKaraokeControls({ pitchSemitones: 2, rate: 1.1 }), { pitchSemitones: 2, rate: 1.1 });
-});
-
-test("semitonesToRatio: 0 semitones is unity", () => {
-  assert.equal(semitonesToRatio(0), 1);
-});
-
-test("semitonesToRatio: +12 semitones (an octave up) doubles the frequency ratio", () => {
-  assert.ok(Math.abs(semitonesToRatio(12) - 2) < 1e-9);
-});
-
-test("semitonesToRatio: -12 semitones (an octave down) halves the frequency ratio", () => {
-  assert.ok(Math.abs(semitonesToRatio(-12) - 0.5) < 1e-9);
 });
 
 function makeBlock({ sectionKey, blockIndexTag, words }) {

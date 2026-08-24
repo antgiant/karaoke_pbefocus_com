@@ -2,11 +2,10 @@
 // lookahead algorithm -- see audio/limiter-processor.js, the
 // AudioWorkletProcessor that actually runs this against the real audio
 // graph. Duplicated there rather than imported: AudioWorklet modules in
-// this app stay plain classic scripts, same as
-// audio/pitch-shift-processor.js's file-top comment explains. This module
-// exists purely so the algorithm itself has automated test coverage
-// (tests/limiter-math.test.mjs) without a real AudioWorkletGlobalScope --
-// keep the two in sync by hand if either changes.
+// this app stay plain classic scripts (see limiter-processor.js's file-top
+// comment for why). This module exists purely so the algorithm itself has
+// automated test coverage (tests/limiter-math.test.mjs) without a real
+// AudioWorkletGlobalScope -- keep the two in sync by hand if either changes.
 
 /**
  * One-pole smoothing coefficient that gets a gain envelope ~98% of the way
