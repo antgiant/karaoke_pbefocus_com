@@ -9,7 +9,7 @@ function makeManifest({ takeCount = 1 } = {}) {
   for (let i = 0; i < takeCount; i++) {
     recordings.push({ style: "hiphop", take: i + 1, instrumentalUrl: `t${i}.instrumental.m4a`, vocalUrl: `t${i}.vocal.m4a`, words });
   }
-  const section = { book: "Mark", chapter: 1, verseStart: null, verseEnd: null, recordings };
+  const section = { book: "Mark", chapter: 1, verseStart: null, verseEnd: null, wordCount: words.length, recordings };
   return { styles: [{ id: "hiphop", label: "Hip Hop" }], sections: [section] };
 }
 

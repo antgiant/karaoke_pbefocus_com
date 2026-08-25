@@ -15,11 +15,33 @@ export function validateManifest(manifest) {
     throw new Error("Manifest has no 'sections' list.");
   }
   for (const section of manifest.sections) {
-    if (!section.book || !section.chapter || !Array.isArray(section.recordings) || section.recordings.length === 0) {
-      throw new Error(`Manifest section is missing book/chapter/recordings: ${JSON.stringify(section).slice(0, 120)}`);
+    if (
+      !section.book ||
+      !section.chapter ||
+      !Array.isArray(section.recordings) ||
+      section.recordings.length === 0 ||
+      !Array.isArray(section.verseNumbers) ||
+      typeof section.wordCount !== "number"
+    ) {
+      throw new Error(`Manifest section is missing book/chapter/recordings/wordCount/verseNumbers: ${JSON.stringify(section).slice(0, 120)}`);
     }
   }
   return manifest;
+}
+
+/**
+ * Validates and unwraps one recording's word-timing sidecar (fetched from
+ * its `wordsUrl` -- see offline/words-loader.js), returning its `words`
+ * array in the shape every consumer here already expects
+ * (`{word, start, end, verse}`). The sidecar itself is produced by the
+ * pipeline (transcribe.py/correct_lyrics.py), not build_manifest.py, so
+ * this only checks the one thing callers actually depend on.
+ */
+export function parseWordsFile(json) {
+  if (!json || !Array.isArray(json.words)) {
+    throw new Error(`Word-timing file has no "words" list: ${JSON.stringify(json).slice(0, 120)}`);
+  }
+  return json.words;
 }
 
 export function passageLabel(section) {
@@ -42,9 +64,14 @@ export function buildBookTree(manifest) {
       verseStart: section.verseStart,
       verseEnd: section.verseEnd,
       label: passageLabel(section),
-      wordCount: section.recordings[0]?.words.length ?? 0,
+      // wordCount/verseNumbers are precomputed by build_manifest.py (same
+      // "canonical recording = most verse-tagged words" rule as
+      // canonicalWords below) -- browsing the chapter tree needs a word
+      // *count*, not word *content*, so it must work without fetching any
+      // recording's wordsUrl.
+      wordCount: section.wordCount ?? 0,
       styleIds: [...new Set(section.recordings.map((r) => r.style))],
-      verseNumbers: sectionVerseNumbers(section),
+      verseNumbers: section.verseNumbers ?? [],
     });
   }
 
@@ -114,11 +141,6 @@ export function canonicalWords(section) {
     }
   }
   return best.words.filter((w) => w.verse !== null);
-}
-
-/** Distinct verse numbers actually present in a section, in order -- the selectable set for the per-chapter verse picker (not just verseStart..verseEnd, since a rough take can be missing a verse's audio entirely). */
-export function sectionVerseNumbers(section) {
-  return [...new Set(canonicalWords(section).map((w) => w.verse))].sort((a, b) => a - b);
 }
 
 /**

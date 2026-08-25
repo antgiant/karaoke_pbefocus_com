@@ -30,9 +30,13 @@ export function summarize(selected, manifest, verseSelections) {
   for (const key of selected) {
     const section = findSection(manifest, key);
     if (!section) continue;
-    const words = section.recordings[0]?.words ?? [];
     const verseSet = verseSelections?.get(key);
-    wordCount += verseSet ? words.filter((w) => w.verse !== null && verseSet.has(w.verse)).length : words.length;
+    // wordCount/wordCountByVerse are precomputed (build_manifest.py) so this
+    // running estimate needs no recording's wordsUrl fetched -- see
+    // library.js's buildBookTree for the same convention.
+    wordCount += verseSet
+      ? [...verseSet].reduce((sum, v) => sum + (section.wordCountByVerse?.[v] ?? 0), 0)
+      : (section.wordCount ?? 0);
   }
   return {
     sectionCount: selected.size,

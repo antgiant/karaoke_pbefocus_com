@@ -167,17 +167,16 @@
   "chapter": 6,
   "verseStart": 30,
   "verseEnd": 56,
+  "wordCount": 245,
+  "verseNumbers": [30, 31, 32, 33, 34],
+  "wordCountByVerse": { "30": 32, "31": 28, "32": 33 },
   "recordings": [
     {
       "style": "contemporarychristian",
       "take": 1,
       "instrumentalUrl": "Mark 6_30-56 (1).instrumental.m4a",
       "vocalUrl": "Mark 6_30-56 (1).vocal.m4a",
-      "words": [
-        { "word": "Now", "start": 0.42, "end": 0.71, "verse": 30 },
-        { "word": "the", "start": 0.71, "end": 0.85, "verse": 30 },
-        { "word": "apostles", "start": 0.85, "end": 1.38, "verse": 30 }
-      ]
+      "wordsUrl": "Mark 6_30-56 (1).json"
     }
   ]
 }</code></pre>
@@ -185,6 +184,14 @@
           <tr><th><code>book</code></th><td>Book name exactly as it should be displayed and grouped in the passage picker.</td></tr>
           <tr><th><code>chapter</code></th><td>Chapter number.</td></tr>
           <tr><th><code>verseStart</code> / <code>verseEnd</code></th><td>Optional. Omit both (or set to <code>null</code>) for a whole-chapter section.</td></tr>
+          <tr><th><code>wordCount</code></th><td>
+            Required. Total scripture-word count for this section (its canonical recording — the one
+            with the most verse-tagged words — see <code>wordsUrl</code> below). Lets the app show a
+            running word-count/duration estimate while browsing, without fetching any recording's
+            word timing.
+          </td></tr>
+          <tr><th><code>verseNumbers</code></th><td>Required. Distinct verse numbers actually present in this section, in order — the selectable set for the per-chapter verse picker (not simply <code>verseStart..verseEnd</code>, since a rough take can be missing a verse's audio entirely).</td></tr>
+          <tr><th><code>wordCountByVerse</code></th><td>Required. Word count per verse number (keys are verse numbers) — same idea as <code>wordCount</code>, but for the running estimate once a Pathfinder has narrowed a chapter down to specific verses.</td></tr>
           <tr><th><code>recordings</code></th><td>At least one recording, described below. A section can have several — different styles, or multiple takes of the same style.</td></tr>
         </table>
         <p>Each entry in <code>recordings</code>:</p>
@@ -198,14 +205,39 @@
             length and stay in sync. Any browser-playable audio format works (e.g. mp3, m4a, wav).
             See "Folder Structure" below for what these paths should look like.
           </td></tr>
-          <tr><th><code>words</code></th><td>Word-by-word timing for this specific recording, described below.</td></tr>
+          <tr><th><code>wordsUrl</code></th><td>
+            Word-by-word timing for this specific recording, resolved the same way as
+            <code>instrumentalUrl</code>/<code>vocalUrl</code> (see "Folder Structure" below) — kept
+            as its own small file per recording, fetched only once this section is actually selected
+            to study, rather than inlined into the manifest itself (which used to make the manifest
+            far too large to fetch up front). See <code>words</code> below for that file's shape.
+          </td></tr>
+          <tr><th><code>tagsUrl</code></th><td>
+            Optional. Song metadata for this specific take (<code>title</code>/<code>artist</code>/
+            <code>album</code>/<code>genre</code>/<code>styleDescription</code>), shown/embedded
+            wherever the app surfaces it (e.g. a downloaded MP3's ID3 tags) — a small JSON file
+            resolved the same way as <code>instrumentalUrl</code>, e.g.
+            <code>{ "title": "...", "artist": "...", "album": "...", "genre": "...", "styleDescription": "..." }</code>.
+            Omit whichever fields don't apply within that file, or omit <code>tagsUrl</code> entirely
+            if none apply.
+          </td></tr>
+          <tr><th><code>coverUrl</code></th><td>
+            Optional. Cover art for this specific take, resolved the same way as
+            <code>instrumentalUrl</code>/<code>vocalUrl</code> (see "Folder Structure" below).
+          </td></tr>
         </table>
       </section>
 
       <section class="panel doc-panel">
-        <h2><code>words</code></h2>
-        <p>An ordered array covering every word in the recording, used to drive the karaoke highlight, the blanking/recall study modes, and Type Ahead/Sing-Along scoring:</p>
-        <pre><code>{ "word": "apostles", "start": 0.85, "end": 1.38, "verse": 30 }</code></pre>
+        <h2><code>words</code> (the file <code>wordsUrl</code> points to)</h2>
+        <p>A separate JSON file per recording — not part of the manifest itself — containing an ordered array covering every word in that recording, used to drive the karaoke highlight, the blanking/recall study modes, and Type Ahead/Sing-Along scoring:</p>
+        <pre><code>{
+  "words": [
+    { "word": "Now", "start": 0.42, "end": 0.71, "verse": 30 },
+    { "word": "the", "start": 0.71, "end": 0.85, "verse": 30 },
+    { "word": "apostles", "start": 0.85, "end": 1.38, "verse": 30 }
+  ]
+}</code></pre>
         <table>
           <tr><th><code>word</code></th><td>The word as it should be displayed.</td></tr>
           <tr><th><code>start</code> / <code>end</code></th><td>Seconds into <em>this recording's own audio files</em> (not the section, not a global clock) when the word is sung.</td></tr>

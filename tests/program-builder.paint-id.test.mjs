@@ -16,6 +16,7 @@ function makeManifest() {
     chapter: 1,
     verseStart: null,
     verseEnd: null,
+    wordCount: 2,
     recordings: [
       {
         style: "hiphop",

@@ -21,7 +21,7 @@
 // instrumentalUrl/vocalUrl in the manifest), so a repeat play never
 // touches Google Drive again once cached.
 
-import { CACHE_KIND, cacheKeyedUrl, resolveUrlSync as audioResolveUrlSync } from "./audio-cache.js";
+import { CACHE_KIND, cacheKeyedUrl, fetchCachedJson, resolveUrlSync as audioResolveUrlSync } from "./audio-cache.js";
 import { saveManifest, loadManifest } from "./manifest-cache.js";
 
 // Restricted (HTTP referrer + Drive API only) in Google Cloud Console --
@@ -281,4 +281,11 @@ export async function primeResolverCache(blocks, onRetry) {
       await cacheKeyedUrl(CACHE_KIND.OPPORTUNISTIC, path, mediaUrl(fileId));
     })
   );
+}
+
+/** Fetches+caches (offline/audio-cache.js's shared opportunistic cache, same as audio) and parses one recording's word-timing sidecar (wordsUrl) -- no separate mint step needed, same as primeResolverCache's audio. Lazy: called only once a section is actually selected for study/mix-editing (see offline/words-loader.js). */
+export async function readWordsAtPath(relativePath, onRetry) {
+  if (!activeRoot) throw new Error("No Google Drive library is active.");
+  const fileId = await resolveItemForPath(activeRoot, relativePath, onRetry);
+  return fetchCachedJson(relativePath, mediaUrl(fileId));
 }

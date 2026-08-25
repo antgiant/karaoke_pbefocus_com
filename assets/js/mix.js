@@ -1,4 +1,4 @@
-import { canonicalWords, findSection, listTakes, orderedSections, sectionKey } from "./library.js";
+import { findSection, listTakes, orderedSections, sectionKey } from "./library.js";
 
 /**
  * The genre-assignment model: for every selected section, an array of
@@ -58,15 +58,14 @@ export function createMix(defaultStyleId) {
   return { defaultStyleId, sections: new Map() };
 }
 
-/** Ensures every currently-selected section has an assignment array, sized to its canonical word count. */
+/** Ensures every currently-selected section has an assignment array, sized to its canonical word count. Uses the manifest's precomputed section.wordCount (same number canonicalWords(section).length would give, once that section's recordings' words are actually loaded) rather than the real word content -- this runs synchronously on every selection change, well before a section's words are lazily fetched (see offline/words-loader.js), so it must not depend on them. */
 export function syncMixToSelection(mix, manifest, selectedKeys) {
   const selected = new Set(selectedKeys);
   for (const key of selected) {
     if (mix.sections.has(key)) continue;
     const section = findSection(manifest, key);
     if (!section) continue;
-    const length = canonicalWords(section).length;
-    mix.sections.set(key, new Array(length).fill(mix.defaultStyleId));
+    mix.sections.set(key, new Array(section.wordCount).fill(mix.defaultStyleId));
   }
   for (const key of [...mix.sections.keys()]) {
     if (!selected.has(key)) mix.sections.delete(key);
@@ -125,7 +124,7 @@ export function fromSerializable(saved, manifest) {
   for (const section of orderedSections(manifest)) {
     const key = sectionKey(section);
     const savedAssignment = saved.sections[key];
-    if (Array.isArray(savedAssignment) && savedAssignment.length === canonicalWords(section).length) {
+    if (Array.isArray(savedAssignment) && savedAssignment.length === section.wordCount) {
       mix.sections.set(key, savedAssignment);
     }
   }

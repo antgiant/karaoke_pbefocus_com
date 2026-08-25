@@ -9,6 +9,7 @@ import {
   cacheUsage,
   clearCache,
   downloadBlocksForOffline,
+  fetchCachedJson,
   formatCacheUsage,
   isCached,
   pickEvictions,
@@ -120,6 +121,24 @@ test("clearCache: removes both the Cache Storage entries and the usage index for
   await clearCache(CACHE_KIND.OPPORTUNISTIC);
   assert.deepEqual(cacheUsage(CACHE_KIND.OPPORTUNISTIC), { bytes: 0, count: 0 });
   assert.deepEqual(cacheUsage(CACHE_KIND.DOWNLOAD), { bytes: 2048, count: 2 });
+});
+
+test("fetchCachedJson: fetches+caches an arbitrary JSON asset (e.g. a recording's wordsUrl) via the same opportunistic cache as audio, and returns it parsed; a cache hit never re-fetches", async () => {
+  let fetchCount = 0;
+  const words = { text: "In the beginning", words: [{ word: "In", start: 0, end: 0.3, verse: 1 }] };
+  globalThis.fetch = async () => {
+    fetchCount += 1;
+    return Response.json(words);
+  };
+
+  const first = await fetchCachedJson("https://host/Mark 1.json", "https://host/Mark 1.json");
+  assert.deepEqual(first, words);
+  assert.equal(fetchCount, 1);
+  assert.equal(isCached(CACHE_KIND.OPPORTUNISTIC, "https://host/Mark 1.json"), true);
+
+  const second = await fetchCachedJson("https://host/Mark 1.json", "https://host/Mark 1.json");
+  assert.deepEqual(second, words);
+  assert.equal(fetchCount, 1, "a cache hit must not re-fetch the JSON asset");
 });
 
 test("resolveUrlSync/primeResolverCache: an already-cached track resolves to a blob: URL after priming; an uncached one falls back to its remote URL", async () => {

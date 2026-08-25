@@ -11,7 +11,15 @@ function fileOf(text) {
 
 const VALID_MANIFEST = {
   styles: [{ id: "hiphop", label: "Hip Hop" }],
-  sections: [{ book: "Mark", chapter: 1, recordings: [{ style: "hiphop", take: 1, words: [] }] }],
+  sections: [
+    {
+      book: "Mark",
+      chapter: 1,
+      wordCount: 0,
+      verseNumbers: [],
+      recordings: [{ style: "hiphop", take: 1, wordsUrl: "Mark 1.json" }],
+    },
+  ],
 };
 
 test("readManifestFile: a well-formed manifest file resolves to the parsed manifest", async () => {

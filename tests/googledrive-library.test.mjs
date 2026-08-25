@@ -7,6 +7,7 @@ import {
   isGoogleDriveShareLink,
   resolveGoogleDriveFolder,
   readManifestFromGoogleDrive,
+  readWordsAtPath,
   setActiveRoot,
   resolveUrlSync,
   primeResolverCache,
@@ -19,8 +20,16 @@ const VALID_MANIFEST = {
     {
       book: "Mark",
       chapter: 1,
+      wordCount: 0,
+      verseNumbers: [],
       recordings: [
-        { style: "hiphop", take: 1, instrumentalUrl: "Style/Mark 1.instrumental.m4a", vocalUrl: "Style/Mark 1.vocal.m4a", words: [] },
+        {
+          style: "hiphop",
+          take: 1,
+          instrumentalUrl: "Style/Mark 1.instrumental.m4a",
+          vocalUrl: "Style/Mark 1.vocal.m4a",
+          wordsUrl: "Style/Mark 1.json",
+        },
       ],
     },
   ],
@@ -63,6 +72,7 @@ function makeDriveFetch({ rateLimit } = {}) {
         files: [
           { id: "instr1", name: "Mark 1.instrumental.m4a", mimeType: "audio/mp4" },
           { id: "vocal1", name: "Mark 1.vocal.m4a", mimeType: "audio/mp4" },
+          { id: "words1", name: "Mark 1.json", mimeType: "application/json" },
         ],
       });
     }
@@ -74,6 +84,9 @@ function makeDriveFetch({ rateLimit } = {}) {
     }
     if (url.includes("/files/vocal1?alt=media")) {
       return new Response(new Uint8Array(500), { status: 200 });
+    }
+    if (url.includes("/files/words1?alt=media")) {
+      return Response.json({ text: "In the beginning", words: [{ word: "In", start: 0, end: 0.3, verse: 1 }] });
     }
     throw new Error(`fake fetch: no stub for ${url}`);
   };
@@ -108,7 +121,10 @@ test("resolveGoogleDriveFolder + readManifestFromGoogleDrive: walks the shared f
   const root = await resolveGoogleDriveFolder(SHARE_URL);
   const manifest = await readManifestFromGoogleDrive(root, validateManifest);
   assert.deepEqual(manifest, VALID_MANIFEST);
-  assert.deepEqual([...root.entries.keys()].sort(), ["Style/Mark 1.instrumental.m4a", "Style/Mark 1.vocal.m4a", "manifest.local.json"]);
+  assert.deepEqual(
+    [...root.entries.keys()].sort(),
+    ["Style/Mark 1.instrumental.m4a", "Style/Mark 1.json", "Style/Mark 1.vocal.m4a", "manifest.local.json"]
+  );
 });
 
 test("resolveGoogleDriveFolder: rejects a link pointing at a file, not a folder", async () => {
@@ -188,4 +204,19 @@ test("primeResolverCache + resolveUrlSync: fetches and caches each recording; a 
   await primeResolverCache(blocks);
   const mediaCallsAfterSecond = calls.filter((u) => u.includes("alt=media") && (u.includes("instr1") || u.includes("vocal1"))).length;
   assert.equal(mediaCallsAfterSecond, mediaCallsAfterFirst, "an already-cached recording must not be fetched again");
+});
+
+test("readWordsAtPath: fetches, caches, and parses a recording's word-timing sidecar (wordsUrl); a repeat read never re-fetches", async () => {
+  const { fetchImpl, calls } = makeDriveFetch();
+  installFakeCaches({ fetchImpl });
+  const root = await resolveGoogleDriveFolder(SHARE_URL);
+  setActiveRoot(root);
+
+  const json = await readWordsAtPath("Style/Mark 1.json");
+  assert.deepEqual(json, { text: "In the beginning", words: [{ word: "In", start: 0, end: 0.3, verse: 1 }] });
+
+  const mediaCallsAfterFirst = calls.filter((u) => u.includes("/files/words1?alt=media")).length;
+  await readWordsAtPath("Style/Mark 1.json");
+  const mediaCallsAfterSecond = calls.filter((u) => u.includes("/files/words1?alt=media")).length;
+  assert.equal(mediaCallsAfterSecond, mediaCallsAfterFirst, "an already-cached sidecar must not be fetched again");
 });

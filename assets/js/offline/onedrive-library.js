@@ -24,7 +24,7 @@
 // different string every ~hour), so a repeat play never re-touches
 // OneDrive at all once cached. See that function's own comment for why.
 
-import { CACHE_KIND, cacheKeyedUrl, resolveUrlSync as audioResolveUrlSync } from "./audio-cache.js";
+import { CACHE_KIND, cacheKeyedUrl, fetchCachedJson, resolveUrlSync as audioResolveUrlSync } from "./audio-cache.js";
 import { saveManifest, loadManifest } from "./manifest-cache.js";
 
 const AZURE_CLIENT_ID = "1b28096c-568a-4299-ae55-fe69f14423b5"; // same app registration as Step_Up_Automator -- see PBE_2026_2027/AGENTS.md's "One-time Azure setup"
@@ -303,4 +303,13 @@ export async function primeResolverCache(blocks, onRetry) {
       await cacheKeyedUrl(CACHE_KIND.OPPORTUNISTIC, path, () => mintDownloadUrl(item, activeToken, onRetry));
     })
   );
+}
+
+/** Fetches+caches (offline/audio-cache.js's shared opportunistic cache, same as audio) and parses one recording's word-timing sidecar (wordsUrl) -- mints a fresh OneDrive download URL only on a cache miss, same as primeResolverCache's audio. Lazy: called only once a section is actually selected for study/mix-editing (see offline/words-loader.js). */
+export async function readWordsAtPath(relativePath, onRetry) {
+  if (!activeRoot) throw new Error("No OneDrive library is active.");
+  return fetchCachedJson(relativePath, async () => {
+    const item = await resolveItemForPath(activeRoot, relativePath, activeToken, onRetry);
+    return mintDownloadUrl(item, activeToken, onRetry);
+  });
 }

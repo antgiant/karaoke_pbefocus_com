@@ -148,6 +148,15 @@ let activeRoot = null;
 // Session-lifetime, same posture as audio-cache.js's objectUrlCache.
 const objectUrlCache = new Map();
 
+/** Reads and parses one recording's word-timing sidecar (wordsUrl) straight off disk -- no caching layer needed, same posture as readManifestFromHandle (a local folder needs no offline fallback, it *is* already local). Lazy: called only once a section is actually selected for study/mix-editing (see offline/words-loader.js). */
+export async function readWordsAtPath(relativePath) {
+  if (!activeRoot) throw new Error("No local library folder is active.");
+  const fileHandle = await getFileHandleByPath(activeRoot, relativePath);
+  const file = await fileHandle.getFile();
+  const text = await file.text();
+  return JSON.parse(text);
+}
+
 /** Binds the folder every resolve()/prime() call below resolves paths against -- call once, right after a successful local-folder unlock (see gate.js). */
 export function setActiveRoot(handle) {
   activeRoot = handle;

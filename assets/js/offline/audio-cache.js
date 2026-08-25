@@ -208,6 +208,27 @@ export async function downloadBlocksForOffline(blocks, onProgress) {
   }
 }
 
+/**
+ * Fetches+caches `key` into the opportunistic cache, like
+ * cacheOpportunistically, but for a single arbitrary JSON asset (e.g. a
+ * recording's word-timing sidecar, wordsUrl) keyed by its own stable path
+ * rather than a fixed instrumental/vocal pair -- then parses and returns
+ * it as JSON. `getUrl` is the same lazy string-or-function contract as
+ * cacheKeyedUrl (only called on a cache miss). Shared tail end for every
+ * source that already routes its audio through this cache (plain hosted,
+ * OneDrive, Google Drive) -- see offline/words-loader.js. Reads the parsed
+ * body straight back out of Cache Storage (already populated by
+ * cacheKeyedUrl above) rather than re-fetching resolveUrlSync's blob: URL
+ * -- simpler, and avoids a real network round trip on every call just to
+ * re-read bytes already sitting in the cache.
+ */
+export async function fetchCachedJson(key, getUrl) {
+  await cacheKeyedUrl(CACHE_KIND.OPPORTUNISTIC, key, getUrl);
+  const cache = await caches.open(cacheNameFor(CACHE_KIND.OPPORTUNISTIC));
+  const response = await cache.match(key);
+  return response.json();
+}
+
 /** Deletes a whole cache kind -- both its Cache Storage entries and its index bucket. */
 export async function clearCache(kind) {
   await caches.delete(cacheNameFor(kind));

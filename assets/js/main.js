@@ -43,13 +43,27 @@ import {
   cacheUsage,
   clearCache,
   downloadBlocksForOffline,
+  fetchCachedJson,
   formatCacheUsage,
   primeResolverCache,
   resolveUrlSync,
 } from "./offline/audio-cache.js";
-import { primeResolverCache as primeLocalResolverCache, resolveUrlSync as resolveLocalUrlSync } from "./offline/local-library.js";
-import { primeResolverCache as primeOneDriveResolverCache, resolveUrlSync as resolveOneDriveUrlSync } from "./offline/onedrive-library.js";
-import { primeResolverCache as primeGoogleDriveResolverCache, resolveUrlSync as resolveGoogleDriveUrlSync } from "./offline/googledrive-library.js";
+import {
+  primeResolverCache as primeLocalResolverCache,
+  resolveUrlSync as resolveLocalUrlSync,
+  readWordsAtPath as readWordsFromLocal,
+} from "./offline/local-library.js";
+import {
+  primeResolverCache as primeOneDriveResolverCache,
+  resolveUrlSync as resolveOneDriveUrlSync,
+  readWordsAtPath as readWordsFromOneDrive,
+} from "./offline/onedrive-library.js";
+import {
+  primeResolverCache as primeGoogleDriveResolverCache,
+  resolveUrlSync as resolveGoogleDriveUrlSync,
+  readWordsAtPath as readWordsFromGoogleDrive,
+} from "./offline/googledrive-library.js";
+import { ensureWordsLoaded } from "./offline/words-loader.js";
 
 // AI_TODO.md item 7 (offline support): registers the app-shell service
 // worker (assets/js/../../sw.js at the repo root, so its default scope
@@ -431,6 +445,16 @@ function initSelectionUi(manifest, manifestUrl) {
   // (offline/googledrive-library.js) that fetches+caches each recording's
   // bytes itself -- so it needs the same distinct branch below.
   const isGoogleDriveLibrary = isGoogleDriveShareLink(manifestUrl);
+  // Fetches+attaches one recording's word timing (its wordsUrl) on demand --
+  // picked once per the manifest's source, same branching as the
+  // setUrlResolver wiring further down. See offline/words-loader.js.
+  const readWords = isLocalLibrary
+    ? readWordsFromLocal
+    : isOneDriveLibrary
+      ? readWordsFromOneDrive
+      : isGoogleDriveLibrary
+        ? readWordsFromGoogleDrive
+        : (url) => fetchCachedJson(url, url);
   const playlists = sameLibrary && state.playlists.length ? state.playlists : [createPlaylistRecord("My Playlist")];
   let activePlaylistId =
     sameLibrary && findPlaylist(playlists, state.activePlaylistId) ? state.activePlaylistId : playlists[0].id;
@@ -530,11 +554,19 @@ function initSelectionUi(manifest, manifestUrl) {
   const mixEditorContainer = document.getElementById("mixEditor");
   const toggleMixEditorBtn = document.getElementById("toggleMixEditorBtn");
   let mixEditorHandle = null;
+  // Guards against a stale async load winning a race against a newer one
+  // (e.g. two selection changes in quick succession) -- see below.
+  let mixEditorLoadToken = 0;
 
-  function renderMixEditorIfOpen() {
+  /** Async because painting needs every selected section's recordings' real word timing loaded first (mix-editor.js reads it synchronously at mount) -- see offline/words-loader.js. Not awaited by most callers (fire-and-forget is fine; the mix editor just fills in a moment later), guarded by mixEditorLoadToken so a superseded call never mounts after a newer one already has. */
+  async function renderMixEditorIfOpen() {
     mixEditorHandle?.unmount();
     mixEditorHandle = null;
     if (mixEditorContainer.hidden) return;
+    const token = ++mixEditorLoadToken;
+    mixEditorContainer.textContent = "Loading…";
+    await ensureWordsLoaded(manifest, selected, readWords);
+    if (token !== mixEditorLoadToken) return; // superseded by a newer call while this one was loading
     mixEditorHandle = mountMixEditor(mixEditorContainer, manifest, mix, selected, () => {
       persistActivePlaylist();
     });
@@ -801,11 +833,13 @@ function initSelectionUi(manifest, manifestUrl) {
       alert("Select at least one chapter or verse range first.");
       return;
     }
-    const verseFilter = buildVerseFilter(selected, verseSelections);
-    const program = buildProgram(manifest, mix, selected, verseFilter);
     offlineDownloadPlaylistBtn.disabled = true;
     offlineDownloadStatusEl.hidden = false;
+    offlineDownloadStatusEl.textContent = "Loading word timing…";
     try {
+      await ensureWordsLoaded(manifest, selected, readWords);
+      const verseFilter = buildVerseFilter(selected, verseSelections);
+      const program = buildProgram(manifest, mix, selected, verseFilter);
       await downloadBlocksForOffline(program.blocks, (done, total) => {
         offlineDownloadStatusEl.textContent = total > 0 ? `Downloading… ${done} / ${total} recordings` : "Nothing to download.";
       });
@@ -1203,15 +1237,31 @@ function initSelectionUi(manifest, manifestUrl) {
     engine.play();
   }
 
-  document.getElementById("startKaraokeBtn").addEventListener("click", () => {
+  /** Runs `action` once word timing for `keys` is loaded (see offline/words-loader.js), disabling `btn` and showing "Loading…" meanwhile -- shared by every study-mode launch button below, each of which needs its selection's real recordings loaded before it can build a program. */
+  async function startWithWordsLoaded(btn, keys, action) {
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Loading…";
+    try {
+      await ensureWordsLoaded(manifest, keys, readWords);
+      action();
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  }
+
+  document.getElementById("startKaraokeBtn").addEventListener("click", async (event) => {
     if (selected.size === 0) {
       renderFallbackNote(manifest, []);
       alert("Select at least one chapter or verse range first.");
       return;
     }
-    const verseFilter = buildVerseFilter(selected, verseSelections);
-    const program = buildProgram(manifest, mix, selected, verseFilter);
-    launchKaraokeStudy(program, mix, verseFilter);
+    await startWithWordsLoaded(event.currentTarget, selected, () => {
+      const verseFilter = buildVerseFilter(selected, verseSelections);
+      const program = buildProgram(manifest, mix, selected, verseFilter);
+      launchKaraokeStudy(program, mix, verseFilter);
+    });
   });
 
   /**
@@ -1226,105 +1276,122 @@ function initSelectionUi(manifest, manifestUrl) {
    * order) that has it selected, so a section selected in more than one
    * playlist is only included once, not duplicated per playlist.
    */
-  document.getElementById("startReviewBtn").addEventListener("click", () => {
+  document.getElementById("startReviewBtn").addEventListener("click", async (event) => {
     persistActivePlaylist(); // the active playlist's record needs to reflect any just-made changes before scanning across playlists
 
     const onlyHistory = reviewSourceSelect.value === "history";
-    const claimed = new Set();
-    const blocks = [];
-    const fallbacks = [];
-    const displayMix = { defaultStyleId: mix.defaultStyleId, sections: new Map() };
-    const verseFilter = new Map();
-
+    // Superset of every key any playlist might contribute below (pre-dedup
+    // "claimed" logic doesn't matter here -- ensureWordsLoaded skips
+    // whatever's already loaded, so a key touched by more than one playlist
+    // just costs one fetch either way).
+    const allKeys = new Set();
     for (const record of playlists) {
-      const keys = record.selectedSectionKeys.filter(
-        (k) => !claimed.has(k) && (!onlyHistory || (practiceHistory[k]?.length ?? 0) > 0)
-      );
-      if (keys.length === 0) continue;
-      keys.forEach((k) => claimed.add(k));
-
-      const recordMix = record.mix ? fromSerializable(record.mix, manifest) : createMix(record.activeStyle || manifest.styles[0].id);
-      const recordVerseFilter = buildVerseFilter(new Set(keys), createVerseSelections(record.verseSelections));
-      const recordProgram = buildProgram(manifest, recordMix, keys, recordVerseFilter);
-      blocks.push(...recordProgram.blocks);
-      fallbacks.push(...recordProgram.fallbacks);
-      for (const k of keys) {
-        displayMix.sections.set(k, recordMix.sections.get(k));
-        if (recordVerseFilter.has(k)) verseFilter.set(k, recordVerseFilter.get(k));
+      for (const k of record.selectedSectionKeys) {
+        if (!onlyHistory || (practiceHistory[k]?.length ?? 0) > 0) allKeys.add(k);
       }
     }
 
-    if (blocks.length === 0) {
-      alert(
-        onlyHistory
-          ? 'No passages with practice history yet — study something first, or switch to "Every selected passage."'
-          : "No passages selected in any playlist yet."
+    await startWithWordsLoaded(event.currentTarget, allKeys, () => {
+      const claimed = new Set();
+      const blocks = [];
+      const fallbacks = [];
+      const displayMix = { defaultStyleId: mix.defaultStyleId, sections: new Map() };
+      const verseFilter = new Map();
+
+      for (const record of playlists) {
+        const keys = record.selectedSectionKeys.filter(
+          (k) => !claimed.has(k) && (!onlyHistory || (practiceHistory[k]?.length ?? 0) > 0)
+        );
+        if (keys.length === 0) continue;
+        keys.forEach((k) => claimed.add(k));
+
+        const recordMix = record.mix ? fromSerializable(record.mix, manifest) : createMix(record.activeStyle || manifest.styles[0].id);
+        const recordVerseFilter = buildVerseFilter(new Set(keys), createVerseSelections(record.verseSelections));
+        const recordProgram = buildProgram(manifest, recordMix, keys, recordVerseFilter);
+        blocks.push(...recordProgram.blocks);
+        fallbacks.push(...recordProgram.fallbacks);
+        for (const k of keys) {
+          displayMix.sections.set(k, recordMix.sections.get(k));
+          if (recordVerseFilter.has(k)) verseFilter.set(k, recordVerseFilter.get(k));
+        }
+      }
+
+      if (blocks.length === 0) {
+        alert(
+          onlyHistory
+            ? 'No passages with practice history yet — study something first, or switch to "Every selected passage."'
+            : "No passages selected in any playlist yet."
+        );
+        return;
+      }
+
+      launchKaraokeStudy(shuffleBySection({ blocks, fallbacks }), displayMix, verseFilter);
+    });
+  });
+
+  document.getElementById("sleepModeBtn").addEventListener("click", async (event) => {
+    if (selected.size === 0) {
+      alert("Select at least one chapter or verse range first.");
+      return;
+    }
+    await startWithWordsLoaded(event.currentTarget, selected, () => {
+      const verseFilter = buildVerseFilter(selected, verseSelections);
+      const program = buildProgram(manifest, mix, selected, verseFilter);
+      unmountStudyView?.();
+      unmountPlayerControls?.();
+      unmountStudyView = null;
+      unmountPlayerControls = null;
+      document.getElementById("karaokeView").innerHTML = "";
+      document.getElementById("playerControls").innerHTML = "";
+      const record = findPlaylist(playlists, activePlaylistId);
+      const { instrumentalVolume = 1, vocalVolume = 1 } = record.studyOptions ?? defaultStudyOptions();
+      mountSleepMode(engine, program, manifest, mix, {
+        styleLabelFor,
+        verseFilter,
+        instrumentalVolume,
+        vocalVolume,
+        onVolumesChange: (volumes) => {
+          record.studyOptions = { ...(record.studyOptions ?? defaultStudyOptions()), ...volumes };
+          persistFullState();
+        },
+        textScale: karaokeTextScale.sleep,
+        onTextScaleChange: (scale) => {
+          karaokeTextScale = { ...karaokeTextScale, sleep: scale };
+          persistFullState();
+        },
+      });
+    });
+  });
+
+  document.getElementById("startNameThatPassageBtn").addEventListener("click", async (event) => {
+    if (selected.size === 0) {
+      alert("Select at least one chapter or verse range first.");
+      return;
+    }
+    await startWithWordsLoaded(event.currentTarget, selected, () => {
+      const verseFilter = buildVerseFilter(selected, verseSelections);
+      unmountStudyView?.();
+      unmountPlayerControls?.();
+      unmountStudyView = null;
+      unmountPlayerControls = null;
+      const karaokeView = document.getElementById("karaokeView");
+      document.getElementById("playerControls").innerHTML = "";
+      const getNtpOptions = () => ({
+        helpLevel: Math.min(100, Math.max(0, Number(ntpHelpSlider.value) || 0)) / 100,
+        inputMethod: ntpInputSelect.value,
+      });
+      unmountStudyView = mountNameThatPassage(
+        karaokeView,
+        engine,
+        manifest,
+        mix,
+        selected,
+        verseFilter,
+        getNtpOptions,
+        logAttempt,
+        (fallbacks) => renderFallbackNote(manifest, fallbacks)
       );
-      return;
-    }
-
-    launchKaraokeStudy(shuffleBySection({ blocks, fallbacks }), displayMix, verseFilter);
-  });
-
-  document.getElementById("sleepModeBtn").addEventListener("click", () => {
-    if (selected.size === 0) {
-      alert("Select at least one chapter or verse range first.");
-      return;
-    }
-    const verseFilter = buildVerseFilter(selected, verseSelections);
-    const program = buildProgram(manifest, mix, selected, verseFilter);
-    unmountStudyView?.();
-    unmountPlayerControls?.();
-    unmountStudyView = null;
-    unmountPlayerControls = null;
-    document.getElementById("karaokeView").innerHTML = "";
-    document.getElementById("playerControls").innerHTML = "";
-    const record = findPlaylist(playlists, activePlaylistId);
-    const { instrumentalVolume = 1, vocalVolume = 1 } = record.studyOptions ?? defaultStudyOptions();
-    mountSleepMode(engine, program, manifest, mix, {
-      styleLabelFor,
-      verseFilter,
-      instrumentalVolume,
-      vocalVolume,
-      onVolumesChange: (volumes) => {
-        record.studyOptions = { ...(record.studyOptions ?? defaultStudyOptions()), ...volumes };
-        persistFullState();
-      },
-      textScale: karaokeTextScale.sleep,
-      onTextScaleChange: (scale) => {
-        karaokeTextScale = { ...karaokeTextScale, sleep: scale };
-        persistFullState();
-      },
     });
-  });
-
-  document.getElementById("startNameThatPassageBtn").addEventListener("click", () => {
-    if (selected.size === 0) {
-      alert("Select at least one chapter or verse range first.");
-      return;
-    }
-    const verseFilter = buildVerseFilter(selected, verseSelections);
-    unmountStudyView?.();
-    unmountPlayerControls?.();
-    unmountStudyView = null;
-    unmountPlayerControls = null;
-    const karaokeView = document.getElementById("karaokeView");
-    document.getElementById("playerControls").innerHTML = "";
-    const getNtpOptions = () => ({
-      helpLevel: Math.min(100, Math.max(0, Number(ntpHelpSlider.value) || 0)) / 100,
-      inputMethod: ntpInputSelect.value,
-    });
-    unmountStudyView = mountNameThatPassage(
-      karaokeView,
-      engine,
-      manifest,
-      mix,
-      selected,
-      verseFilter,
-      getNtpOptions,
-      logAttempt,
-      (fallbacks) => renderFallbackNote(manifest, fallbacks)
-    );
   });
 }
 

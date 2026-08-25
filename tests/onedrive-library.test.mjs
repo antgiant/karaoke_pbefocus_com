@@ -8,6 +8,7 @@ import {
   signIn,
   resolveOneDriveFolder,
   readManifestFromOneDrive,
+  readWordsAtPath,
   setActiveRoot,
   resolveUrlSync,
   primeResolverCache,
@@ -20,8 +21,16 @@ const VALID_MANIFEST = {
     {
       book: "Mark",
       chapter: 1,
+      wordCount: 0,
+      verseNumbers: [],
       recordings: [
-        { style: "hiphop", take: 1, instrumentalUrl: "Style/Mark 1.instrumental.m4a", vocalUrl: "Style/Mark 1.vocal.m4a", words: [] },
+        {
+          style: "hiphop",
+          take: 1,
+          instrumentalUrl: "Style/Mark 1.instrumental.m4a",
+          vocalUrl: "Style/Mark 1.vocal.m4a",
+          wordsUrl: "Style/Mark 1.json",
+        },
       ],
     },
   ],
@@ -61,6 +70,7 @@ function makeGraphFetch({ retry429 } = {}) {
         value: [
           { id: "instr1", name: "Mark 1.instrumental.m4a", size: 100 },
           { id: "vocal1", name: "Mark 1.vocal.m4a", size: 50 },
+          { id: "words1", name: "Mark 1.json", size: 20 },
         ],
       });
     }
@@ -81,6 +91,12 @@ function makeGraphFetch({ retry429 } = {}) {
     }
     if (url === "https://cdn.example/vocal1") {
       return new Response(new Uint8Array(500), { status: 200 });
+    }
+    if (url.includes("/items/words1?")) {
+      return Response.json({ "@microsoft.graph.downloadUrl": "https://cdn.example/words1" });
+    }
+    if (url === "https://cdn.example/words1") {
+      return Response.json({ text: "In the beginning", words: [{ word: "In", start: 0, end: 0.3, verse: 1 }] });
     }
     throw new Error(`fake fetch: no stub for ${url}`);
   };
@@ -136,7 +152,10 @@ test("resolveOneDriveFolder + readManifestFromOneDrive: walks the shared folder 
   const root = await resolveOneDriveFolder(SHARE_URL, "fake-token");
   const manifest = await readManifestFromOneDrive(root, "fake-token", validateManifest);
   assert.deepEqual(manifest, VALID_MANIFEST);
-  assert.deepEqual([...root.entries.keys()].sort(), ["Style/Mark 1.instrumental.m4a", "Style/Mark 1.vocal.m4a", "manifest.local.json"]);
+  assert.deepEqual(
+    [...root.entries.keys()].sort(),
+    ["Style/Mark 1.instrumental.m4a", "Style/Mark 1.json", "Style/Mark 1.vocal.m4a", "manifest.local.json"]
+  );
 });
 
 test("readManifestFromOneDrive: falls back to the cached copy when a later fetch fails, same posture as gate.js's fetchManifest for a hosted URL", async () => {
@@ -196,4 +215,19 @@ test("primeResolverCache + resolveUrlSync: mints, fetches, and caches each recor
   await primeResolverCache(blocks);
   const mintCallsAfterSecond = calls.filter((u) => u.includes("/items/instr1?") || u.includes("/items/vocal1?")).length;
   assert.equal(mintCallsAfterSecond, mintCallsAfterFirst, "an already-cached recording must not mint a fresh download URL again");
+});
+
+test("readWordsAtPath: mints, fetches, caches, and parses a recording's word-timing sidecar (wordsUrl); a repeat read never re-mints", async () => {
+  const { fetchImpl, calls } = makeGraphFetch();
+  installFakeCaches({ fetchImpl });
+  const root = await resolveOneDriveFolder(SHARE_URL, "fake-token");
+  setActiveRoot(root, "fake-token");
+
+  const json = await readWordsAtPath("Style/Mark 1.json");
+  assert.deepEqual(json, { text: "In the beginning", words: [{ word: "In", start: 0, end: 0.3, verse: 1 }] });
+
+  const mintCallsAfterFirst = calls.filter((u) => u.includes("/items/words1?")).length;
+  await readWordsAtPath("Style/Mark 1.json");
+  const mintCallsAfterSecond = calls.filter((u) => u.includes("/items/words1?")).length;
+  assert.equal(mintCallsAfterSecond, mintCallsAfterFirst, "an already-cached sidecar must not mint a fresh download URL again");
 });
