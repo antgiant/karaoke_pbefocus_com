@@ -109,12 +109,38 @@ Cheapest signal first, escalate only on failure:
    n-gram index of the scripture text. The user confirms in the UI
    ("Looks like Mark 6:30-56 — correct?").
 
-**Scripture text source (decision needed):** the NKJV file is private and
-copyrighted, so the app can't ship it. **Rec.:** the library root holds a
-`scripture.json` (the existing local NKJV file, renamed or read as-is). The
-app discovers it, caches it, and builds the index client-side. With no
-scripture text, degrade to a "free transcript" tier (no verse tags, no
-blanking modes).
+**Reference text sources (decided direction; details pending):** the app
+needs the canonical words of whatever a song sings, for identification (§1c.3)
+and alignment (§1d). Two corpora, behind one `TextSource` interface
+(`getPassage(ref) → [{verse, words[]}]`, `searchIndex()` for fuzzy
+identification) so alignment never cares where text came from:
+
+1. **Scripture, live from the same API quiz.pbefocus.com uses.** Fetched
+   on demand per book/chapter, cached aggressively (Cache Storage + an
+   n-gram index in IndexedDB, keyed by book/chapter/version), and prefetched
+   for every passage found in a scanned library, so after the first visit
+   alignment works offline. Needs CORS enabled for this app's origin
+   (`karaoke.pbefocus.com`) on that API; if it isn't, a one-line change on the
+   quiz side, or a tiny proxy. **Which translation the API serves must match
+   the one the songs were written from (NKJV today); a mismatch silently
+   degrades alignment, so Phase 0 checks it against the reference songs.**
+2. **Commentary text (ABC), preprocessed offline and committed to the repo.**
+   Public per-book PDFs get converted by a one-time build script
+   (`tools/extract-commentary/`: PDF text extraction, strip headers/footers/
+   page numbers, normalize hyphenation and smart quotes, segment into the
+   units songs are actually built from) into `data/commentary/<book>.json`
+   plus a small `index.json`. The app fetches only the books it needs, and the
+   service worker caches them. The extraction is run by a maintainer when a
+   new year's PDFs appear; it is not part of the user's runtime, so users still
+   install nothing. Extraction is the risky step (multi-column layouts,
+   footnotes, sidebars), so each book gets a spot-check report (word counts,
+   odd-character rate, unmatched-segment list) before it's committed.
+
+Passage identity extends to `{source: "scripture"|"commentary", book, ref}`;
+the sidecar records which source and version aligned it, and the filename
+convention for commentary songs is needed to detect it (§9). With neither
+source available (API unreachable, no network on first run), degrade to the
+"free transcript" tier (no verse tags, no blanking modes).
 
 ### 1d. Alignment (the "aligned STT")
 
@@ -340,8 +366,9 @@ Layered, content-addressed, stale-while-revalidate:
 
 ## 9. Open questions (with my defaults)
 
-1. Ship the tiered "lyrics before stems" experience? **Rec.: yes.**
-2. Scripture text delivered as a file in the library root? **Rec.: yes.**
+1. ~~Tiered "lyrics before stems"~~ **Decided: yes.**
+2. ~~Reference text~~ **Decided direction:** scripture via the quiz API,
+   commentary via preprocessed JSON in the repo. Still needed: see §9a.
 3. ~~Google Drive scope~~ **Decided:** Picker + `drive.file` only.
 4. ~~Lone files~~ **Decided:** browser-local (OPFS) with a warning and an
    upgrade-to-cloud action. Browser target: Chrome/Edge for local-folder
@@ -351,3 +378,17 @@ Layered, content-addressed, stale-while-revalidate:
 6. Can you make `scripts/` (or at least `build_manifest.py`,
    `correct_lyrics.py`, `separate_stems.py`) and ~5 reference songs with their
    outputs available for Phase 0?
+
+### 9a. Needed to finish the text-source design
+
+- The quiz API's base URL, request/response shape, translation(s) offered, and
+  whether it sends CORS headers for `karaoke.pbefocus.com`. (That repo isn't
+  reachable from this session; a pasted example request/response or access to
+  the repo is enough.)
+- Links to the per-book commentary PDFs, and which commentary "ABC" means
+  here (Andrews Bible Commentary vs. SDA Bible Commentary), since extraction
+  quirks differ per publication.
+- How commentary songs relate to the text: do they sing commentary prose
+  verbatim, and how are their files named, so §1c step 1 can recognize them?
+- Rights check on committing the extracted commentary text to a public repo,
+  separate from the PDFs being freely downloadable.
