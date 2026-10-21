@@ -115,48 +115,84 @@ and alignment (§1d). Two corpora, behind one `TextSource` interface
 (`getPassage(ref) → [{verse, words[]}]`, `searchIndex()` for fuzzy
 identification) so alignment never cares where text came from:
 
-1. **Scripture, live from bolls.life, exactly as quiz.pbefocus.com does it**
-   (`quiz_pbefocus_com/assets/js/data-service.js`). One request per chapter:
-   `GET https://bolls.life/get-text/NKJV/{bookNumber}/{chapter}/`, where
-   `bookNumber` is the 1-66 canonical number (the quiz's `41-mark` ids carry it
-   as their prefix; this app's `CANONICAL_BOOK_ORDER` index + 1 gives the
-   same). A single-verse endpoint, `get-verse/NKJV/{book}/{ch}/{v}/`, also
-   exists; we only need the chapter one. The quiz calls it straight from the
-   browser, so CORS is already permissive. Port the quiz's tolerant response
-   parser (it accepts several field names) rather than assuming one shape.
-   - **Normalize before use.** The quiz never strips markup, so I can't tell
-     from its code whether NKJV text from bolls carries `<i>` italics for
-     supplied words, footnote marks, or Strong's tags. The extractor must strip
-     tags and entities, fold curly quotes, and split the lyric-vs-text
-     differences the existing pipeline already handles (`correct_lyrics.py`).
-     Phase 0 samples a real chapter and a few songs.
-   - Cache each chapter permanently (the text never changes) in IndexedDB,
-     plus an n-gram index for identification (§1c.3). Prefetch every passage
-     found in a scanned library, so after first use alignment works fully
-     offline. A third-party API is a single point of failure, so a failed
-     fetch queues the song rather than failing it, with retry.
-   - The Phase 0 translation check is now a non-issue to *find* (it's NKJV in
-     both places) but still worth running: bolls' NKJV must match the text your
-     songs were generated from, word for word.
-2. **Commentary text (ABC), preprocessed offline and committed to the repo.**
-   (Source: this year's commentary PDFs listed at
-   <https://nadpbe.org/pbe-resources/>.)
-   Public per-book PDFs get converted by a one-time build script
-   (`tools/extract-commentary/`: PDF text extraction, strip headers/footers/
-   page numbers, normalize hyphenation and smart quotes, segment into the
-   units songs are actually built from) into `data/commentary/<book>.json`
-   plus a small `index.json`. The app fetches only the books it needs, and the
-   service worker caches them. The extraction is run by a maintainer when a
-   new year's PDFs appear; it is not part of the user's runtime, so users still
-   install nothing. Extraction is the risky step (multi-column layouts,
-   footnotes, sidebars), so each book gets a spot-check report (word counts,
-   odd-character rate, unmatched-segment list) before it's committed.
+1. **Scripture from bolls.life, as one whole-translation download.** The
+   API docs (`Bolls-Bible/bain/docs/API.md`) explicitly ask clients *not* to
+   page through `get-text` chapter by chapter to collect a whole Bible (it's a
+   single small server), and point to
+   `https://bolls.life/static/translations/NKJV.json` (also `.zip`) instead.
+   The quiz currently makes per-chapter calls
+   (`get-text/NKJV/{book}/{chapter}/`, book = 1-66 canonical number); this
+   app should do the better thing: **download `NKJV.json` once**, parse it into
+   per-chapter records plus an n-gram index for identification (§1c.3), and
+   store those locally. One request replaces hundreds and makes everything
+   after it offline. (Mind the unknown size: verses plus `comment` fields, so
+   expect single-digit MB; Phase 0 measures it. Unzip via
+   `DecompressionStream` if `.json` ever misbehaves, as the docs suggest.)
+   - **Normalize.** The docs confirm verse text is *HTML* (`<i>`, `<br>`),
+     so strip tags/entities, fold curly quotes/dashes, and drop `comment`
+     content. Phase 0 diffs a normalized chapter against your existing
+     NKJV file word-for-word, since alignment quality depends on it.
+   - A failed download queues songs instead of failing them, with retry.
+   - Single-verse and per-chapter endpoints stay as a fallback only.
+2. **Commentary text (ABC), OCR'd offline and committed to the repo.** The PDF
+   you attached (Mark, 1-2 Peter, 1-3 John) turns out to be **6 scanned page
+   images (A4, 300 dpi) with no text layer**: one page per book, two
+   columns, hyphenated line breaks ("fo-cus"), slight skew, scan specks. Each
+   page holds that book's *introduction*: Title and Authorship, Date,
+   Backgrounds, Theology and Purpose (roughly 300-450 words). So:
+   - The one-time tool (`tools/extract-commentary/`) must **OCR** (Tesseract,
+     two-column layout mode), not just extract text; then de-hyphenate, join
+     columns in reading order, drop page numbers/rules/specks, normalize quotes,
+     and split on the four bold headings.
+   - OCR output is checked by a person (it's ~2,000 words total, so a full
+     read-through is cheap) before commit. Each book writes
+     `data/commentary/<book>.json` with `{sections:[{id, heading, text}]}`.
+   - **"Verses" don't exist in commentary.** The app's unit for these songs is
+     the *section* (or paragraph); sections are numbered 1..n as stand-in verse
+     numbers, with the heading kept as a display label, so study modes,
+     navigation, and blanking keep working. This needs a small `unitLabel`
+     field in the manifest/sidecar and a UI string tweak ("section 2" vs.
+     "verse 2").
+   - Tesseract isn't installed in this sandbox, so I haven't run OCR; Phase 0
+     does that and reports accuracy on all six pages.
 
 Passage identity extends to `{source: "scripture"|"commentary", book, ref}`;
 the sidecar records which source and version aligned it, and the filename
 convention for commentary songs is needed to detect it (§9). With neither
 source available (API unreachable, no network on first run), degrade to the
 "free transcript" tier (no verse tags, no blanking modes).
+
+### 1c-bis. One Bible download shared across all pbefocus.com subdomains
+
+Browser storage (IndexedDB, Cache Storage, OPFS, service workers) is per
+*origin*, so `karaoke.` and `quiz.pbefocus.com` can't see each other's copy. Two
+mechanisms do cross subdomains, because browsers partition by top-level *site*
+(`pbefocus.com`), not full hostname:
+
+- **Shared HTTP cache (free, partial).** If both apps fetch the *same URL*
+  with the default cache, they share one entry. That holds for the bolls.life
+  file automatically, but only if bolls sends useful `Cache-Control`/`ETag`
+  headers, which I couldn't check from here. Without them it still works as
+  a cheap conditional request, not a re-download.
+- **Shared store iframe (robust). Rec.** A tiny page on one canonical origin
+  (e.g. `https://pbefocus.com/shared-store.html`, in the `pbefocus.com` repo)
+  owns an IndexedDB holding the parsed Bible and commentary indexes. Every
+  subdomain embeds it as a hidden iframe and talks to it over `postMessage`
+  (`get(book, chapter)`, `has(version)`, `put(...)`). Because all embedders
+  share the top-level site, they share its partition, so the translation is
+  downloaded and parsed **once for the whole family** and works offline for all.
+  It stores only what the visitor's own browser fetched from bolls; we don't
+  host or redistribute the NKJV text ourselves.
+- The same bridge can hold the commentary JSON, and later any other data the
+  two apps both want (e.g. book names, the quiz's question index).
+- Fallback when the bridge is blocked (older Safari/ITP, strict privacy
+  settings, or the iframe not yet deployed): each app uses its own origin
+  cache. Behaviour is identical; only the duplicate download returns.
+- This is a shared module (`shared-store.js` client + the iframe page).
+  **It needs a change in `pbefocus.com`**, which this session can't reach,
+  and a matching small change in `quiz_pbefocus_com`. Add it to the go-live
+  checklist beside the `site-nav.js` note in `AGENTS.md`. Phase 0 verifies
+  cross-subdomain sharing really works in Chrome, Firefox, and Safari.
 
 ### 1d. Alignment (the "aligned STT")
 
@@ -176,6 +212,38 @@ have to. **Rec.: try cheap, escalate on low confidence.**
 
 I expect Whisper's cross-attention timestamps to be looser (~100-200 ms) than
 CTC's. Phase 0 measures that against your existing Python outputs.
+
+**Verbatim vs. adapted: the user confirms, per song.** Both scripture and
+commentary songs may sing the text word for word, paraphrase it, or mix the two.
+The app can estimate which, but shouldn't decide silently:
+1. After identification, run a cheap probe (CTC-align ~30 s of vocal and score
+   it; or transcribe it and measure word overlap with the reference).
+2. Show a **"Words" chip** on each song: `Exact text` / `Adapted` / `Mixed`,
+   pre-selected from the probe with its confidence ("looks exact, 94% match").
+   For a folder it's applied as a default to every song with a one-click bulk
+   confirm, and can be overridden per song. Songs are held in "Needs
+   confirmation" only until the first decision is made; low-confidence ones
+   are held, high-confidence ones proceed provisionally so nothing stalls
+   while the user is away.
+3. What each choice does:
+   - **Exact:** the fast path above (CTC against the reference; Whisper only
+     for low-scoring verses).
+   - **Adapted:** skip straight to Whisper. The *sung* words become the
+     displayed lyrics and the reference text is used only to tag each sung
+     line with its nearest verse/section (fuzzy match; no match => `verse:
+     null`).
+   - **Mixed:** per-verse decision by score, as in the escalation above, and
+     the chip shows "3 of 12 verses adapted" so the user can see and fix it.
+4. The choice and probe score are stored in `.pbek.json`.
+
+**Dependency to flag:** the existing app assumes every take of a section has
+essentially the same words (`library.js` `alignWordsToCanonical`, matched by
+verse + position). Adapted songs break that, so alignment across takes would
+produce gap warnings (AI_TODO item 15's symptom, amplified). Genre-mix painting
+across adapted takes should splice at verse/section boundaries only, which is
+exactly what AI_TODO item 13 plans. So **item 13 (verse-granularity) should
+land before or with Phase 2**, and adapted takes need a per-take word list
+(their own "canonical") rather than aligning to a shared reference.
 
 ### 1e. Stem separation
 
@@ -237,7 +305,8 @@ honest and interruptible.
   already-prepared vs. new, and an **estimate for this device** ("~2 h 10 min
   for full stems · ~25 min for lyrics-only"). The user chooses a mode:
   **Lyrics first** (T1 for all, then stems in the background), **Full**, or
-  **Lyrics only**.
+  **Lyrics only**, plus the per-song **Words** chip (§1d: Exact / Adapted /
+  Mixed) with a bulk "apply to folder" confirm.
 - **Persistent progress chip** in the header ("Preparing 4 of 31 · ~1 h 20 m")
   opening a **Library** panel: a per-song list with state pills
   (`Listed → Queued → Separating 43% → Aligning → Ready (lyrics) → Ready (full)
@@ -342,7 +411,10 @@ Layered, content-addressed, stale-while-revalidate:
   page: (a) forced CTC vs. Whisper word-timing error against the
   Python-produced `.json`; (b) separation time and quality per candidate model
   on WebGPU and WASM; (c) the Drive `drive.file` + Picker folder-child
-  question; (d) AAC encode support matrix. Output: pick models, set the
+  question; (d) AAC encode support matrix; (e) NKJV.json size and its word-for-word match
+  to your NKJV file; (f) OCR accuracy on the six commentary pages; (g) shared
+  store iframe actually sharing across two subdomains in each browser; (h) the
+  exact-vs-adapted probe's accuracy on a few known songs of each kind. Output: pick models, set the
   acceptance thresholds.
 - **Phase 1, provider layer + cache:** `fs/` interface; wrap Local/OneDrive/Drive
   (no behavior change); content-addressed cache; index + delta revalidation;
@@ -395,20 +467,22 @@ Layered, content-addressed, stale-while-revalidate:
    `correct_lyrics.py`, `separate_stems.py`) and ~5 reference songs with their
    outputs available for Phase 0?
 
-### 9a. Needed to finish the text-source design
+### 9a. Remaining text-source questions
 
-Resolved: the scripture API (bolls.life, same calls as the quiz), and where
-the commentary lives (nadpbe.org/pbe-resources). Still open:
+Resolved: scripture source and method (bolls.life whole-translation file),
+commentary source (the attached PDF: scanned book introductions), verbatim vs.
+adapted (user confirms per song, §1d), shared download (§1c-bis).
 
-- **The commentary PDFs themselves.** This sandbox can't reach nadpbe.org or
-  bolls.life (only GitHub is reachable), so I can't download them. Either
-  commit the PDFs to a folder in this repo (e.g. `tools/extract-commentary/
-  input/`; fine to keep them gitignored if you'd rather not publish the PDFs
-  themselves) or run the extractor on a machine that can fetch them.
-  I've confirmed nothing about their layout yet.
-- How commentary songs relate to the text: do they sing commentary prose
-  verbatim, and how are their files named, so §1c step 1 can recognize them?
-- Rights check on committing the *extracted* commentary text to a public repo,
-  separate from the PDFs being freely downloadable. If there's any doubt,
-  the extractor can output to the private library folder instead, and the app
-  reads it from there like it does the manifest.
+- **Commentary scope:** the PDF holds only *book introductions* (4 headed
+  sections per book, ~400 words). Is that everything songs are written from,
+  or are there more PDFs (e.g. the verse-by-verse commentary) coming? It
+  changes the segmentation design.
+- **Filenames of commentary songs** (to recognize them in §1c step 1), e.g.
+  "Mark - Title and Authorship (3).mp3"? A sample would settle it.
+- **Rights:** committing the OCR'd text to a public repo; if in doubt it can
+  go in the private library folder and the app reads it from there.
+- **Shared store ownership:** OK to add `shared-store.html` to the
+  `pbefocus.com` repo and a small client change to quiz, as a prerequisite
+  deploy? (I can't change those repos from this session.)
+- Still outstanding from before: the Python pipeline scripts and ~5
+  reference songs with their outputs.
