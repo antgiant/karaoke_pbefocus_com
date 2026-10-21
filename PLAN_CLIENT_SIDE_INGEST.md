@@ -62,9 +62,10 @@ delta}`).
   OneDrive/Dropbox-synced folder, which is what "shared local folder" most
   likely means.
 - **OPFS:** private browser storage, supported in Chrome, Safari, and Firefox.
-  It is the fallback for browsers without `showDirectoryPicker` (they ingest
-  via `<input webkitdirectory>` / drag-drop into OPFS), with an "Export as
-  zip" button so the work isn't trapped.
+  It is where **lone files** live (see §5), and the fallback for browsers
+  without `showDirectoryPicker` (they ingest via `<input webkitdirectory>` /
+  drag-drop into OPFS), always with an "Export as zip" button and an upgrade
+  path to OneDrive/Drive so the work isn't trapped.
 - **OneDrive:** MSAL scope goes `Files.Read` → `Files.ReadWrite`. This needs a
   one-time re-consent and an update to the Azure app registration. Writes use
   `PUT …/content` under 4 MB and a resumable upload session (320 KiB-multiple
@@ -255,14 +256,16 @@ Layered, content-addressed, stale-while-revalidate:
 
 - Folder: `showDirectoryPicker` (recursive scan), else `<input webkitdirectory>`
   / drag-drop (`webkitGetAsEntry`/`getAsFileSystemHandle`) into OPFS.
-- Single file: `showOpenFilePicker`, drag-drop, or PWA `file_handlers` in
-  `manifest.json` ("Open with PBE Karaoke" from the OS), launched via
-  `launchQueue`.
-- **"Store beside the existing file" caveat:** a handle to one file does *not*
-  grant write access to its parent folder. For a lone file the app asks the
-  user to grant that containing folder once (`startIn` hint, remembered), or
-  falls back to saving beside it in the library root, or to a downloadable
-  zip. This should be explained in the UI, not discovered by failure.
+- Single file: `<input type=file>`, `showOpenFilePicker`, drag-drop, or PWA
+  `file_handlers` in `manifest.json` ("Open with PBE Karaoke" from the OS),
+  launched via `launchQueue`.
+- **Decided: a lone file is treated as an upload into browser-local storage
+  (OPFS).** A handle to one file never grants write access to its parent
+  folder, so there is no "beside the file" for it. The app shows a clear
+  warning ("These files live only in this browser; clearing site data or
+  switching devices loses them") with an **Upgrade to OneDrive / Google Drive**
+  action that moves the audio and its derived files to a chosen cloud folder,
+  plus an "Export as zip" escape hatch. Works identically in every browser.
 - Accept `audio/*` plus known extensions (mp3, m4a, wav, flac, ogg, opus);
   skip already-derived `*.instrumental.*` / `*.vocal.*` so stems are never
   re-ingested.
@@ -271,22 +274,24 @@ Layered, content-addressed, stale-while-revalidate:
 
 - **OneDrive:** straightforward. `Files.ReadWrite` + re-consent. A folder
   shared read-only can't be written; the Overlay covers it.
-- **Google Drive: this is the hard one.** Today's flow uses a public API key,
-  which cannot write. Writing needs OAuth (Google Identity Services, token
-  flow), and the scopes are the problem:
-  - `drive.file` is non-sensitive but only reaches files the app created or
-    the user picked in the Google Picker, so it would not let us write
-    "beside" arbitrary existing files without a Picker step per
-    folder/file (and I'm not certain a picked folder grants its children;
-    needs a quick spike).
-  - Full `drive` is a *restricted* scope: public release means Google's
-    verification and a security assessment. Staying in "Testing" status
-    allows ≤100 named test users with an unverified-app warning.
-  - **Rec.:** Picker + `drive.file` for the first cut and an Overlay fallback;
-    revisit `drive` only if the library goes broadly public.
-- **Browser support:** full experience is Chrome/Edge desktop (WebGPU, directory
-  write). Safari/Firefox get OPFS + export; mobile is read/play-first.
-  **Rec.:** state this on the "Add songs" screen rather than hiding it.
+- **Google Drive: decided, `drive.file` scope via the Google Picker only; the
+  full `drive` scope is off the table.** Today's flow uses a public API key,
+  which cannot write, so writing needs OAuth (Google Identity Services) plus
+  a Picker step where the user selects the library folder. `drive.file` reaches
+  only files the app created or the user picked. Phase 0 must verify whether a
+  picked *folder* grants write access to its existing children. If not, stems
+  and sidecars created by the app are still app-owned (so writable and
+  readable by it), and the Overlay fallback covers anything else. Consequence
+  to design for: files added to the folder by someone else *after* picking may
+  need a re-pick to be visible.
+- **Browser support (corrected):** only one thing is Chromium-only: **writing
+  into a real local folder** (File System Access API). Cloud ingest
+  (OneDrive/Drive writes over HTTP) and lone-file/OPFS storage work in every
+  browser. WebGPU and WebCodecs AAC encode availability in Safari/Firefox is
+  unverified and is a Phase 0 check; where absent, those browsers run the
+  slower WASM path and the Opus/WAV output fallback. iOS also throttles
+  background tabs, so long batches need the Screen Wake Lock toggle.
+  **Rec.:** show a capability summary on the "Add songs" screen.
 
 ## 7. Phases (each independently shippable)
 
@@ -337,9 +342,10 @@ Layered, content-addressed, stale-while-revalidate:
 
 1. Ship the tiered "lyrics before stems" experience? **Rec.: yes.**
 2. Scripture text delivered as a file in the library root? **Rec.: yes.**
-3. Google Drive write via Picker + `drive.file` now, full `drive` later?
-   **Rec.: yes.**
-4. Primary target Chrome/Edge desktop, others degraded? **Rec.: yes.**
+3. ~~Google Drive scope~~ **Decided:** Picker + `drive.file` only.
+4. ~~Lone files~~ **Decided:** browser-local (OPFS) with a warning and an
+   upgrade-to-cloud action. Browser target: Chrome/Edge for local-folder
+   writes, all browsers for cloud + lone files (verify in Phase 0).
 5. Keep the Python pipeline as the bulk/"gold" path alongside the browser one?
    **Rec.: yes**, with identical sidecar formats so they interoperate.
 6. Can you make `scripts/` (or at least `build_manifest.py`,
