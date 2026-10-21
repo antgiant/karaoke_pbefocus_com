@@ -115,16 +115,32 @@ and alignment (§1d). Two corpora, behind one `TextSource` interface
 (`getPassage(ref) → [{verse, words[]}]`, `searchIndex()` for fuzzy
 identification) so alignment never cares where text came from:
 
-1. **Scripture, live from the same API quiz.pbefocus.com uses.** Fetched
-   on demand per book/chapter, cached aggressively (Cache Storage + an
-   n-gram index in IndexedDB, keyed by book/chapter/version), and prefetched
-   for every passage found in a scanned library, so after the first visit
-   alignment works offline. Needs CORS enabled for this app's origin
-   (`karaoke.pbefocus.com`) on that API; if it isn't, a one-line change on the
-   quiz side, or a tiny proxy. **Which translation the API serves must match
-   the one the songs were written from (NKJV today); a mismatch silently
-   degrades alignment, so Phase 0 checks it against the reference songs.**
+1. **Scripture, live from bolls.life, exactly as quiz.pbefocus.com does it**
+   (`quiz_pbefocus_com/assets/js/data-service.js`). One request per chapter:
+   `GET https://bolls.life/get-text/NKJV/{bookNumber}/{chapter}/`, where
+   `bookNumber` is the 1-66 canonical number (the quiz's `41-mark` ids carry it
+   as their prefix; this app's `CANONICAL_BOOK_ORDER` index + 1 gives the
+   same). A single-verse endpoint, `get-verse/NKJV/{book}/{ch}/{v}/`, also
+   exists; we only need the chapter one. The quiz calls it straight from the
+   browser, so CORS is already permissive. Port the quiz's tolerant response
+   parser (it accepts several field names) rather than assuming one shape.
+   - **Normalize before use.** The quiz never strips markup, so I can't tell
+     from its code whether NKJV text from bolls carries `<i>` italics for
+     supplied words, footnote marks, or Strong's tags. The extractor must strip
+     tags and entities, fold curly quotes, and split the lyric-vs-text
+     differences the existing pipeline already handles (`correct_lyrics.py`).
+     Phase 0 samples a real chapter and a few songs.
+   - Cache each chapter permanently (the text never changes) in IndexedDB,
+     plus an n-gram index for identification (§1c.3). Prefetch every passage
+     found in a scanned library, so after first use alignment works fully
+     offline. A third-party API is a single point of failure, so a failed
+     fetch queues the song rather than failing it, with retry.
+   - The Phase 0 translation check is now a non-issue to *find* (it's NKJV in
+     both places) but still worth running: bolls' NKJV must match the text your
+     songs were generated from, word for word.
 2. **Commentary text (ABC), preprocessed offline and committed to the repo.**
+   (Source: this year's commentary PDFs listed at
+   <https://nadpbe.org/pbe-resources/>.)
    Public per-book PDFs get converted by a one-time build script
    (`tools/extract-commentary/`: PDF text extraction, strip headers/footers/
    page numbers, normalize hyphenation and smart quotes, segment into the
@@ -381,14 +397,18 @@ Layered, content-addressed, stale-while-revalidate:
 
 ### 9a. Needed to finish the text-source design
 
-- The quiz API's base URL, request/response shape, translation(s) offered, and
-  whether it sends CORS headers for `karaoke.pbefocus.com`. (That repo isn't
-  reachable from this session; a pasted example request/response or access to
-  the repo is enough.)
-- Links to the per-book commentary PDFs, and which commentary "ABC" means
-  here (Andrews Bible Commentary vs. SDA Bible Commentary), since extraction
-  quirks differ per publication.
+Resolved: the scripture API (bolls.life, same calls as the quiz), and where
+the commentary lives (nadpbe.org/pbe-resources). Still open:
+
+- **The commentary PDFs themselves.** This sandbox can't reach nadpbe.org or
+  bolls.life (only GitHub is reachable), so I can't download them. Either
+  commit the PDFs to a folder in this repo (e.g. `tools/extract-commentary/
+  input/`; fine to keep them gitignored if you'd rather not publish the PDFs
+  themselves) or run the extractor on a machine that can fetch them.
+  I've confirmed nothing about their layout yet.
 - How commentary songs relate to the text: do they sing commentary prose
   verbatim, and how are their files named, so §1c step 1 can recognize them?
-- Rights check on committing the extracted commentary text to a public repo,
-  separate from the PDFs being freely downloadable.
+- Rights check on committing the *extracted* commentary text to a public repo,
+  separate from the PDFs being freely downloadable. If there's any doubt,
+  the extractor can output to the private library folder instead, and the app
+  reads it from there like it does the manifest.
