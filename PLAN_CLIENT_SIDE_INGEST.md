@@ -470,19 +470,15 @@ Layered, content-addressed, stale-while-revalidate:
 ### 9a. Remaining text-source questions
 
 Resolved: scripture source and method (bolls.life whole-translation file),
-commentary source (the attached PDF: scanned book introductions), verbatim vs.
-adapted (user confirms per song, §1d), shared download (§1c-bis).
+commentary source and scope (the attached PDF is the complete ABC commentary:
+six book introductions, section-level units only), verbatim vs. adapted (user
+confirms per song, §1d), shared download (§1c-bis, approved as a prerequisite
+change to `pbefocus.com` and `quiz_pbefocus_com`), and committing the OCR'd
+commentary text to this public repo (approved).
 
-- **Commentary scope:** the PDF holds only *book introductions* (4 headed
-  sections per book, ~400 words). Is that everything songs are written from,
-  or are there more PDFs (e.g. the verse-by-verse commentary) coming? It
-  changes the segmentation design.
 - **Filenames of commentary songs** (to recognize them in §1c step 1), e.g.
-  "Mark - Title and Authorship (3).mp3"? A sample would settle it.
-- **Rights:** committing the OCR'd text to a public repo; if in doubt it can
-  go in the private library folder and the app reads it from there.
-- **Shared store ownership:** OK to add `shared-store.html` to the
-  `pbefocus.com` repo and a small client change to quiz, as a prerequisite
-  deploy? (I can't change those repos from this session.)
-- Still outstanding from before: the Python pipeline scripts and ~5
-  reference songs with their outputs.
+  "Mark - Title and Authorship (3).mp3"? A sample would settle it; until then
+  recognition falls back to the audio probe and a manual "this is commentary"
+  choice in the preview step.
+- Still outstanding: the Python pipeline scripts and ~5 reference songs with
+  their outputs (Phase 0 input).
