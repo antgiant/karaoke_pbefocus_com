@@ -32,6 +32,19 @@ stable to re-fetch it from), so it needs re-uploading each visit. See
 built from the private song library -- that pipeline and
 its output never belong in this public repo (see `.gitignore`).
 
+## Cloud Storage (optional)
+
+Everything is stored in this browser by default and the app never needs an account. The **Storage** button in the header offers to
+back your playlists, practice history and settings up to your own **OneDrive** or **Google Drive**, which keeps them in step on all
+your devices. You choose the folder; the app saves its files in a `karaoke` folder inside it. Nothing is created in your cloud
+account until you choose. Signing in on one PBE site (Karaoke, Quiz, ...) signs you in on the others, and signing out signs you out of all.
+
+- **Synced:** playlists, practice history, the Karaoke Controls defaults and text size.
+- **Never synced:** your library link (it can grant access to your whole private library), the active playlist, and cached audio.
+- **Google Drive is for you alone.** Because of limits Google puts on apps, it cannot be used for shared folders where several people
+  add data; OneDrive can. The dialog says so before you choose Google.
+- Design and rationale: `docs/unified-storage-plan.md` in the `pbefocus.com` repository.
+
 ## Current Features
 
 - Named, multi-playlist support: create/rename/duplicate/delete any number

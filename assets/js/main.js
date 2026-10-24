@@ -64,6 +64,10 @@ import {
   readWordsAtPath as readWordsFromGoogleDrive,
 } from "./offline/googledrive-library.js";
 import { ensureWordsLoaded } from "./offline/words-loader.js";
+import { initCloud } from "./cloud/setup.js";
+import { mountStoragePanel } from "./cloud/storage-panel.js";
+import { createFolderChooser } from "./cloud/folder-chooser.js";
+import { GOOGLE_API_KEY, GOOGLE_APP_ID } from "./cloud/config.js";
 
 // AI_TODO.md item 7 (offline support): registers the app-shell service
 // worker (assets/js/../../sw.js at the repo root, so its default scope
@@ -77,6 +81,37 @@ if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("sw.js").catch(() => {});
   });
+}
+
+// Optional cloud storage (docs/unified-storage-plan.md): local storage stays the default; when the person has chosen OneDrive or Google
+// Drive, a background loop keeps their data in step across devices. Resolves to the `cloud` object, or null if cloud storage is
+// unavailable (the app is then simply local-only). Never rejects, and never delays the app for long.
+const cloudReady = startCloud();
+
+async function startCloud() {
+  try {
+    let renderPanel = () => {};
+    const started = await initCloud({ onChange: () => renderPanel() });
+    if (!started) return null;
+    const { cloud, googleAuth, setFolderChooser } = started;
+    const body = document.getElementById("storageDialogBody");
+    const button = document.getElementById("storageBtn");
+    const dialog = document.getElementById("storageDialog");
+    if (body && button && dialog) {
+      setFolderChooser(createFolderChooser({ document, container: body, google: { getToken: () => googleAuth.getToken(), apiKey: GOOGLE_API_KEY, appId: GOOGLE_APP_ID } }));
+      renderPanel = mountStoragePanel({ document, button, dialog, body, cloud }).render;
+      renderPanel();
+    }
+    return cloud;
+  } catch (error) {
+    console.warn("Cloud storage is unavailable; continuing with local storage only.", error);
+    return null;
+  }
+}
+
+/** Waits for cloud start-up, but never holds the app up for more than a few seconds. */
+function cloudOrNull(ms = 4000) {
+  return Promise.race([cloudReady, new Promise((resolve) => setTimeout(() => resolve(null), ms))]);
 }
 
 /** A shared-playlist payload -> a fresh playlist record (no id assigned by the payload; the importer always gets a new one, same as any other new playlist). */
@@ -418,7 +453,7 @@ function renderFallbackNote(manifest, fallbacks) {
   note.hidden = false;
 }
 
-function initSelectionUi(manifest, manifestUrl) {
+function initSelectionUi(manifest, manifestUrl, cloud = null) {
   const state = loadState();
   // manifestUrl is a real URL for a URL-loaded manifest, or a synthetic
   // `upload:<uuid>` identifier for one loaded via the gate's upload button
@@ -455,9 +490,14 @@ function initSelectionUi(manifest, manifestUrl) {
       : isGoogleDriveLibrary
         ? readWordsFromGoogleDrive
         : (url) => fetchCachedJson(url, url);
-  const playlists = sameLibrary && state.playlists.length ? state.playlists : [createPlaylistRecord("My Playlist")];
+  // Playlists normally reset when a different library is loaded. With cloud storage on they must NOT: the reset would delete every
+  // playlist on every device, because a removed playlist syncs as a deletion. (A playlist's saved sections that this library doesn't
+  // have are simply ignored, as they already were for shared playlists.)
+  const cloudOn = Boolean(cloud) && cloud.snapshot().primary !== "local";
+  const keepPlaylists = sameLibrary || cloudOn;
+  const playlists = keepPlaylists && state.playlists.length ? state.playlists : [createPlaylistRecord("My Playlist")];
   let activePlaylistId =
-    sameLibrary && findPlaylist(playlists, state.activePlaylistId) ? state.activePlaylistId : playlists[0].id;
+    keepPlaylists && findPlaylist(playlists, state.activePlaylistId) ? state.activePlaylistId : playlists[0].id;
 
   const importedRecord = tryImportPlaylistFromUrl();
   if (importedRecord) {
@@ -488,6 +528,29 @@ function initSelectionUi(manifest, manifestUrl) {
       karaokeTextScale,
     });
   }
+
+  /**
+   * Cloud sync hands over a merged state (another device's changes): swap it into the live in-memory copies and redraw, the same way
+   * a playlist delete/switch does. Skipped by cloud.js if the person edited while the sync was running, so it never overwrites an edit.
+   */
+  function applyExternalState(next) {
+    saveState({ ...next, schemaVersion: SCHEMA_VERSION, manifestUrl });
+    playlists.splice(0, playlists.length, ...(next.playlists.length ? next.playlists : [createPlaylistRecord("My Playlist")]));
+    if (!findPlaylist(playlists, activePlaylistId)) activePlaylistId = playlists[0].id;
+    practiceHistory = next.history ?? {};
+    appKaraokeControls = next.karaokeControls;
+    karaokeTextScale = { study: 1, sleep: 1, ...next.karaokeTextScale };
+    loadActivePlaylistIntoMemory();
+    renderStyleOptions(manifest, mix);
+    syncStudyOptionsFromActivePlaylist();
+    renderPlaylistSelect();
+    renderBookTree(manifest, selected, verseSelections, rerender, practiceHistory);
+    renderSummary(selected, manifest, verseSelections);
+    renderMixEditorIfOpen();
+    renderControlsScopeSongOptions();
+    syncControlsPanelFromState();
+  }
+  cloud?.setApplier(applyExternalState);
 
   // Live, in-memory working copies of the active playlist's data -- same
   // shapes (Set/Map/mix-with-a-Map) the app always used for "the
@@ -1396,7 +1459,7 @@ function initSelectionUi(manifest, manifestUrl) {
 }
 
 initGate({
-  onUnlocked(manifest, manifestUrl) {
-    initSelectionUi(manifest, manifestUrl);
+  async onUnlocked(manifest, manifestUrl) {
+    initSelectionUi(manifest, manifestUrl, await cloudOrNull());
   },
 });

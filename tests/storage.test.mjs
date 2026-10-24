@@ -79,3 +79,11 @@ test("saveState is a non-throwing no-op if localStorage.setItem fails (e.g. priv
     localStorage.setItem = original;
   }
 });
+
+test("saveState announces itself so cloud sync can notice local changes", async () => {
+  const { STATE_SAVED_EVENT } = await import("../assets/js/constants.js");
+  let heard = 0;
+  window.addEventListener(STATE_SAVED_EVENT, () => { heard++; });
+  saveState(loadState());
+  assert.equal(heard, 1);
+});

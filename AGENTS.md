@@ -42,3 +42,22 @@ pushed to GitHub, `karaoke.pbefocus.com` DNS/CNAME live, GitHub Pages
 serving it), flip `karaoke`'s `live` to `true` in `pbefocus.com/site-nav.js`
 and redeploy that repo — otherwise this app stays invisible from the other
 two sites' navs indefinitely.
+
+
+## Cloud storage (shared PBE module)
+
+Optional OneDrive / Google Drive sync, designed in `docs/unified-storage-plan.md` (pbefocus.com repo). How it fits together:
+
+- `assets/vendor/pbe-storage/` is a **vendored copy** of `pbefocus.com/shared/storage` (cookie protocol, connection registry, sync engine,
+  OneDrive and Google providers, sign-in adapters). **Never edit it by hand.** Change the source repo, then run
+  `node tools/vendor-pbe-storage.mjs <path to pbefocus.com/shared/storage>`; `VERSION` records the source commit. (The script lives in
+  `tools/`, not `scripts/`, because `/scripts/` is gitignored here.)
+- `assets/js/cloud/sync-state.js` turns the persisted state into a mergeable document and back. Record stamps are *derived* (a content
+  hash per playlist in a sidecar kept in localStorage) so the many in-place mutations in `main.js` need no changes. Pure, fully tested.
+- `assets/js/cloud/cloud.js` runs the sync loop for the person's chosen provider; `setup.js` wires it to the real page; `storage-panel.js`
+  and `folder-chooser.js` are the dialog. `storage.js` fires `pbe:state-saved` after every save, which is how sync learns of local edits.
+- `main.js` swaps the merged state into the running UI through `applyExternalState` (inside `initSelectionUi`). Cloud skips applying a merge
+  if the person edited while the sync was in flight, so a merge never overwrites an edit.
+- With cloud storage on, playlists are **not** reset when a different library is loaded (a reset would sync as deleting every playlist).
+- `assets/js/cloud/msal.js` is the single MSAL client; the OneDrive library link (`offline/onedrive-library.js`) uses it too.
+- `manifestUrl` is device-local on purpose. Do not add it, or anything that grants library access, to the synced document.

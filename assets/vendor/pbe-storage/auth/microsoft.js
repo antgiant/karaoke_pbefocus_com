@@ -7,21 +7,23 @@ import { ErrorKind, StorageError } from "../errors.js";
 export const DEFAULT_SCOPES = ["Files.ReadWrite.All", "User.Read"];
 
 /**
- * @param {{ msal: object, clientId: string, redirectUri: string, scopes?: string[], authority?: string, mode?: "redirect" | "popup" }} opts
- *  `msal` is the vendored library's global (`window.msal`).
+ * @param {{ msal?: object, pca?: object, clientId: string, redirectUri: string, scopes?: string[], authority?: string,
+ *   mode?: "redirect" | "popup", autoRedirect?: boolean }} opts
+ *  `msal` is the vendored library's global (`window.msal`); pass `pca` instead to share an MSAL client the app already has (two
+ *  clients on one cache confuse each other). `autoRedirect` lets a failed quiet sign-in fall back to a page redirect (default: redirect mode only).
  * @returns the StorageAuth object the ConnectionRegistry expects, plus `getToken`.
  */
-export function createMicrosoftAuth({ msal, clientId, redirectUri, scopes = DEFAULT_SCOPES, authority = "https://login.microsoftonline.com/common", mode = "redirect" }) {
-  let pca;
+export function createMicrosoftAuth({ msal, pca: existing, clientId, redirectUri, scopes = DEFAULT_SCOPES, authority = "https://login.microsoftonline.com/common", mode = "redirect", autoRedirect = mode === "redirect" }) {
+  let pca = existing;
   let account = null;
   let ready;
 
   const client = async () => {
-    if (!msal) throw new StorageError(ErrorKind.auth, "The Microsoft sign-in library did not load");
     if (!pca) {
+      if (!msal) throw new StorageError(ErrorKind.auth, "The Microsoft sign-in library did not load");
       pca = new msal.PublicClientApplication({ auth: { clientId, authority, redirectUri }, cache: { cacheLocation: "localStorage" } });
-      ready = pca.initialize();
     }
+    ready ??= pca.initialize();
     await ready;
     return pca;
   };
@@ -70,7 +72,7 @@ export function createMicrosoftAuth({ msal, clientId, redirectUri, scopes = DEFA
         const result = await app.ssoSilent({ scopes, loginHint: hint });
         return adopt(result.account);
       } catch (cause) {
-        if (mode !== "redirect" || !hint) throw cause;
+        if (!autoRedirect || !hint) throw cause; // navigating away mid-session is only acceptable when the app says so
       }
       await app.loginRedirect({ scopes, loginHint: hint });
       return new Promise(() => {});

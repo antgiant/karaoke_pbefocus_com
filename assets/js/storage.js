@@ -1,4 +1,4 @@
-import { STORAGE_KEY } from "./constants.js";
+import { STORAGE_KEY, STATE_SAVED_EVENT } from "./constants.js";
 import { createPlaylistRecord } from "./playlists.js";
 import { defaultKaraokeControls } from "./karaoke-controls.js";
 
@@ -58,6 +58,7 @@ export function loadState() {
 export function saveState(state) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") window.dispatchEvent(new window.Event(STATE_SAVED_EVENT));
   } catch {
     // localStorage unavailable (private browsing, quota, etc.) -- non-fatal, just no persistence.
   }

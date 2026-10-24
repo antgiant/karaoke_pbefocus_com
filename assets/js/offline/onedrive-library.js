@@ -26,9 +26,9 @@
 
 import { CACHE_KIND, cacheKeyedUrl, fetchCachedJson, resolveUrlSync as audioResolveUrlSync } from "./audio-cache.js";
 import { saveManifest, loadManifest } from "./manifest-cache.js";
+// One shared MSAL client (cloud/msal.js), now registered as the PBE Focus app rather than StepUp's.
+import { getPca } from "../cloud/msal.js";
 
-const AZURE_CLIENT_ID = "1b28096c-568a-4299-ae55-fe69f14423b5"; // same app registration as Step_Up_Automator -- see PBE_2026_2027/AGENTS.md's "One-time Azure setup"
-const AZURE_AUTHORITY = "https://login.microsoftonline.com/common";
 const GRAPH_SCOPES = ["Files.Read"];
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 const MANIFEST_FILENAME = "manifest.local.json";
@@ -46,20 +46,6 @@ export function isOneDriveShareLink(value) {
 }
 
 // ---- Sign-in ---------------------------------------------------------------
-
-let pca; // lazily constructed -- window.msal isn't available until the vendored script has loaded
-
-function getPca() {
-  if (!window.msal) {
-    throw new Error("OneDrive sign-in isn't available (the Microsoft sign-in library failed to load) -- try reloading the page.");
-  }
-  if (!pca) {
-    pca = new window.msal.PublicClientApplication({
-      auth: { clientId: AZURE_CLIENT_ID, authority: AZURE_AUTHORITY, redirectUri: window.location.origin + window.location.pathname },
-    });
-  }
-  return pca;
-}
 
 /**
  * Ensures we have a valid Graph access token, prompting an interactive

@@ -672,7 +672,8 @@ details.panel:not([open]) h2 {
 
 /* Playlist sharing (AI_TODO.md item 5) */
 
-dialog#shareDialog {
+dialog#shareDialog,
+dialog#storageDialog {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 1.5rem 1.75rem;
@@ -682,11 +683,13 @@ dialog#shareDialog {
   max-width: min(28rem, 92vw);
 }
 
-dialog#shareDialog::backdrop {
+dialog#shareDialog::backdrop,
+dialog#storageDialog::backdrop {
   background: rgba(6, 40, 49, 0.45);
 }
 
-dialog#shareDialog h2 {
+dialog#shareDialog h2,
+dialog#storageDialog h2 {
   margin: 0 0 1rem;
   font-size: 1.2rem;
   text-transform: uppercase;
@@ -1560,4 +1563,67 @@ body.sleep-mode-active {
   .verse-grid {
     grid-template-columns: repeat(auto-fill, minmax(2.2rem, 1fr));
   }
+}
+
+/* Cloud storage dialog (docs/unified-storage-plan.md) */
+
+dialog#storageDialog {
+  max-width: min(34rem, 94vw);
+}
+
+.storage-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.storage-dialog-body h3 {
+  margin: 0.4rem 0 0;
+  font-size: 1rem;
+}
+
+.storage-summary {
+  margin: 0;
+}
+
+.storage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.storage-connections {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.storage-error {
+  margin: 0;
+  color: #9b1c1c;
+  font-weight: 700;
+}
+
+.folder-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 14rem;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.folder-list .btn {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.folder-crumbs {
+  margin: 0;
+  font-weight: 700;
+  word-break: break-word;
 }

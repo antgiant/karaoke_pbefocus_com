@@ -13,7 +13,6 @@ import { applyDoc, emptyMeta, mergeDocs, SYNC_SCHEMA, toSyncDoc } from "./sync-s
 export const META_KEY = "pbe-karaoke:sync-meta:v1";
 export const NAMESPACE = "karaoke";
 export const DOC = "state";
-export const STATE_SAVED_EVENT = "pbe:state-saved";
 
 export function createCloud({ registry, loadState, saveState, storage, deviceId, now = Date.now, timers, chooseFolder, onChange = () => {}, pollMs = 60_000, debounceMs = 2000 }) {
   let applyState = (state) => saveState(state);

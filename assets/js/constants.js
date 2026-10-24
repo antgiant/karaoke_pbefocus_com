@@ -1,4 +1,6 @@
 export const STORAGE_KEY = "pbe-karaoke:v1";
+// Fired on `window` after every successful saveState, so cloud sync (cloud/setup.js) learns about local changes without every save call site knowing.
+export const STATE_SAVED_EVENT = "pbe:state-saved";
 export const MANIFEST_URL_PARAM = "library";
 // Carries an encoded shared-playlist payload (see share.js/main.js), read
 // once on load and then stripped from the address bar. If the sharer also
