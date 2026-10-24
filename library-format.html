@@ -76,19 +76,18 @@
   <body>
     <header class="site-header">
       <div class="header-inner">
-        <a class="brand" href="https://pbefocus.com" aria-label="PBEfocus.com home">
-          <picture>
-            <source srcset="assets/pbefocus-logo-dark.png" media="(prefers-color-scheme: dark)">
-            <img src="assets/pbefocus-logo.png" alt="PBEfocus.com">
-          </picture>
-        </a>
-        <a class="site-badge" href="/" aria-label="PBE Karaoke home">
-          <picture>
-            <source srcset="assets/site-mark-dark.svg" media="(prefers-color-scheme: dark)">
-            <img src="assets/site-mark.svg" alt="" width="52" height="46">
-          </picture>
-          <span>Karaoke</span>
-        </a>
+        <div class="site-badge">
+          <a class="mark-link" href="/" aria-label="PBE Karaoke home">
+            <picture>
+              <source srcset="assets/site-mark-dark.svg" media="(prefers-color-scheme: dark)">
+              <img src="assets/site-mark.svg" alt="" width="81" height="72">
+            </picture>
+          </a>
+          <span class="lock">
+            <a class="lock-parent" href="https://pbefocus.com">PBEfocus.com</a>
+            <a class="lock-name" href="/">Karaoke</a>
+          </span>
+        </div>
         <nav class="primary-nav" aria-label="Primary navigation">
           <span data-pbe-site-nav style="display:contents">
             <a href="https://pbefocus.com">Home</a>

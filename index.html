@@ -21,19 +21,18 @@
   <body>
     <header class="site-header">
       <div class="header-inner">
-        <a class="brand" href="https://pbefocus.com" aria-label="PBEfocus.com home">
-          <picture>
-            <source srcset="assets/pbefocus-logo-dark.png" media="(prefers-color-scheme: dark)">
-            <img src="assets/pbefocus-logo.png" alt="PBEfocus.com">
-          </picture>
-        </a>
-        <a class="site-badge" href="/" aria-label="PBE Karaoke home">
-          <picture>
-            <source srcset="assets/site-mark-dark.svg" media="(prefers-color-scheme: dark)">
-            <img src="assets/site-mark.svg" alt="" width="52" height="46">
-          </picture>
-          <span>Karaoke</span>
-        </a>
+        <div class="site-badge">
+          <a class="mark-link" href="/" aria-label="PBE Karaoke home">
+            <picture>
+              <source srcset="assets/site-mark-dark.svg" media="(prefers-color-scheme: dark)">
+              <img src="assets/site-mark.svg" alt="" width="81" height="72">
+            </picture>
+          </a>
+          <span class="lock">
+            <a class="lock-parent" href="https://pbefocus.com">PBEfocus.com</a>
+            <a class="lock-name" href="/">Karaoke</a>
+          </span>
+        </div>
         <nav class="primary-nav" aria-label="Primary navigation">
           <span data-pbe-site-nav style="display:contents">
             <a href="https://pbefocus.com">Home</a>
@@ -45,10 +44,6 @@
 
     <main>
       <section class="mission-statement">
-        <picture>
-          <source srcset="assets/site-mark-dark.svg" media="(prefers-color-scheme: dark)">
-          <img class="mission-mark" src="assets/site-mark.svg" alt="" width="117" height="104">
-        </picture>
         <h1>PBE Karaoke</h1>
         <p>
           Pick your chapters and verses, choose the musical style for each part of the
@@ -330,6 +325,9 @@
           <a class="active" href="/">Karaoke</a>
         </span>
       </nav>
+      <p class="site-tagline">
+        Part of <a href="https://pbefocus.com">PBEfocus.com</a> &mdash; equipping Pathfinders for PBE success.
+      </p>
       <p>&copy; PBE Focus. All rights reserved.</p>
     </footer>
   </body>
