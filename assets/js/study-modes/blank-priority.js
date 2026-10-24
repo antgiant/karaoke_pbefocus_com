@@ -1,7 +1,7 @@
 /**
  * Which words invisible-word/blackout-ramp mode should blank first, ported
- * from the sibling pbe-practice-engine tool's fill-in-the-blank word
- * selection (its script.js applyBlanks()/src/utils.js TF-IDF helpers) --
+ * from the sibling pbe-practice-engine tool's blank-word selection
+ * (its script.js applyBlanks()/src/utils.js TF-IDF helpers) --
  * same underlying scripture content, same idea that blanking should target
  * words that actually carry meaning rather than uniform randomness.
  *
