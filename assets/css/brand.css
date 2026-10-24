@@ -1,0 +1,242 @@
+/*
+ * PBEfocus brand layer -- one accent color per site, one shared look.
+ *
+ * SOURCE OF TRUTH: pbefocus.com/brand.css. quiz.pbefocus.com and
+ * karaoke.pbefocus.com each carry a vendored copy at assets/css/brand.css
+ * (offline-safe, same-origin). Edit it HERE, then run `node scripts/sync-brand.mjs`
+ * from this repo to copy it to the sibling checkouts; `--check` reports drift.
+ *
+ * How it works: each page sets <html data-site="pbefocus|quiz|karaoke|scores">.
+ * The existing stylesheets are written in terms of --teal / --teal-dark / --navy /
+ * --teal-soft / --teal-wash / --line, so re-pointing those tokens per site re-themes
+ * the whole page without touching the layout CSS. Everything else here is the small
+ * "you are here" layer: accent bar, header badge, nav dots, tinted hero, button fills.
+ *
+ * Accent hues (light / dark): quiz ruby, karaoke leaf green, score keeper royal blue;
+ * pbefocus.com keeps the family teal. Status colors (error red, "correct" green) are
+ * NOT touched -- always pair them with an icon or text, never hue alone.
+ */
+
+/* ---- tokens: light --------------------------------------------------------- */
+html[data-site="pbefocus"], [data-tool="pbefocus"] {
+  --brand-bar: #0f6370; --brand-dot: #0f6370;
+}
+html[data-site="quiz"], [data-tool="quiz"] {
+  --teal: #a3123a; --teal-dark: #8a0f31; --navy: #5e0a22;
+  --teal-soft: #f8dfe7; --teal-wash: #fdf2f5; --line: #e2bcc8;
+  --brand-bar: #a3123a; --brand-dot: #a3123a;
+  --brand-fill: #8a0f31; --brand-fill-hover: #5e0a22;
+}
+html[data-site="karaoke"], [data-tool="karaoke"] {
+  --teal: #4a7c10; --teal-dark: #3b6409; --navy: #284506;
+  --teal-soft: #e3efd2; --teal-wash: #f3f8ea; --line: #c3d8a6;
+  --brand-bar: #4a7c10; --brand-dot: #4a7c10;
+  --brand-fill: #3b6409; --brand-fill-hover: #284506;
+}
+html[data-site="scores"], [data-tool="scores"] {
+  --teal: #3447c9; --teal-dark: #2a3aa3; --navy: #1c2873;
+  --teal-soft: #dde2f8; --teal-wash: #f1f3fd; --line: #bcc4ee;
+  --brand-bar: #3447c9; --brand-dot: #3447c9;
+  --brand-fill: #2a3aa3; --brand-fill-hover: #1c2873;
+}
+
+/* ---- tokens: dark ---------------------------------------------------------- */
+@media (prefers-color-scheme: dark) {
+  html[data-site="pbefocus"], [data-tool="pbefocus"] { --brand-bar: #3ca8b2; --brand-dot: #63c7cf; }
+  html[data-site="quiz"], [data-tool="quiz"] {
+    --teal: #ff8fab; --teal-dark: #e0527c; --navy: #b8305a;
+    --teal-soft: #2f1520; --teal-wash: #22101a; --line: #5a2c3b;
+    --brand-bar: #e0527c; --brand-dot: #ff8fab;
+    --brand-fill: #b01c4d; --brand-fill-hover: #c8315f;
+  }
+  html[data-site="karaoke"], [data-tool="karaoke"] {
+    --teal: #a3d94a; --teal-dark: #84b82c; --navy: #5f8a1b;
+    --teal-soft: #1b2a0c; --teal-wash: #131f08; --line: #3d5424;
+    --brand-bar: #84b82c; --brand-dot: #a3d94a;
+    --brand-fill: #4a7c10; --brand-fill-hover: #3b6409;
+  }
+  html[data-site="scores"], [data-tool="scores"] {
+    --teal: #8c9dff; --teal-dark: #6a80ff; --navy: #4a5fd6;
+    --teal-soft: #161c3d; --teal-wash: #10152e; --line: #31397a;
+    --brand-bar: #6a80ff; --brand-dot: #8c9dff;
+    --brand-fill: #3447c9; --brand-fill-hover: #4259e0;
+  }
+}
+
+/* ---- "you are here" layer ---------------------------------------------------- */
+
+/* Accent bar across the top of every page. */
+html[data-site] .site-header {
+  border-top: 6px solid var(--brand-bar, var(--teal));
+}
+
+/* Header lockup (tool sites): the site's own mark, with "PBEfocus.com" small above the
+   site name. It replaces the shared PBEfocus.com logo, which looked too much like the marks. */
+.site-badge {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-right: auto;
+}
+
+.site-badge .mark-link {
+  display: block;
+  flex: 0 0 auto;
+}
+
+.site-badge .mark-link img {
+  display: block;
+  height: 72px;
+  width: auto;
+}
+
+.site-badge .lock {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.site-badge .lock-parent {
+  color: var(--ink);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  opacity: 0.75;
+  text-decoration: none;
+}
+
+.site-badge .lock-parent:hover,
+.site-badge .lock-parent:focus-visible {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.site-badge .lock-name {
+  color: var(--teal);
+  font-size: 1.7rem;
+  font-weight: 800;
+  line-height: 1;
+  text-decoration: none;
+}
+
+@media (max-width: 640px) {
+  .site-badge { gap: 0.8rem; }
+  .site-badge .mark-link img { height: 58px; }
+  .site-badge .lock-name { font-size: 1.45rem; }
+}
+
+/* "Part of PBEfocus.com" line in the tool footers. */
+.site-footer .site-tagline {
+  margin-bottom: 0.5rem;
+}
+
+/* A tool's mark above its heading on the pbefocus.com home cards. */
+.tool-mark {
+  display: block;
+  height: 84px;
+  width: auto;
+  margin: 0 auto 0.5rem;
+}
+
+/* Nav: a dot in each site's own color, so every link says where it goes. */
+.primary-nav a[data-site-id]::before,
+.site-footer nav a[data-site-id]::before {
+  content: "";
+  display: inline-block;
+  width: 0.6em;
+  height: 0.6em;
+  margin-right: 0.45em;
+  border-radius: 50%;
+  vertical-align: 0.04em;
+  background: var(--dot, currentColor);
+}
+[data-site-id="pbefocus"] { --dot: #0f6370; }
+[data-site-id="quiz"]     { --dot: #a3123a; }
+[data-site-id="karaoke"]  { --dot: #4a7c10; }
+[data-site-id="scores"]   { --dot: #3447c9; }
+@media (prefers-color-scheme: dark) {
+  [data-site-id="pbefocus"] { --dot: #63c7cf; }
+  [data-site-id="quiz"]     { --dot: #ff8fab; }
+  [data-site-id="karaoke"]  { --dot: #a3d94a; }
+  [data-site-id="scores"]   { --dot: #8c9dff; }
+}
+
+/* Active nav pill follows the accent (was a hard-coded teal). */
+html[data-site] .primary-nav a:hover,
+html[data-site] .primary-nav a:focus-visible,
+html[data-site] .primary-nav .active {
+  background: var(--teal-soft);
+}
+@media (prefers-color-scheme: dark) {
+  html[data-site] .primary-nav a:hover,
+  html[data-site] .primary-nav a:focus-visible,
+  html[data-site] .primary-nav .active {
+    background: color-mix(in srgb, var(--teal) 20%, #091117);
+  }
+}
+
+/* Hero: same photo on every site, tinted with the site's accent. */
+html[data-site] .hero { background: var(--teal-soft); }
+html[data-site] .hero-overlay {
+  background:
+    linear-gradient(90deg,
+      color-mix(in srgb, var(--teal-soft) 90%, transparent),
+      color-mix(in srgb, var(--teal-soft) 72%, transparent) 52%,
+      color-mix(in srgb, var(--teal-soft) 52%, transparent)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.2));
+}
+@media (prefers-color-scheme: dark) {
+  html[data-site] .hero { background: var(--teal-wash); }
+  html[data-site] .hero-overlay {
+    background:
+      linear-gradient(90deg,
+        color-mix(in srgb, var(--teal-wash) 86%, transparent),
+        color-mix(in srgb, var(--teal-wash) 72%, transparent) 52%,
+        color-mix(in srgb, var(--teal-wash) 52%, transparent)),
+      linear-gradient(180deg, rgba(0, 0, 0, 0.22), rgba(0, 0, 0, 0.38));
+  }
+}
+
+/* Filled buttons: the accent in light mode; a dedicated fill in dark mode so white text
+   stays readable (the pastel --teal is for text and borders, not for white-on-color). */
+html[data-site] .btn:not(.secondary),
+html[data-site] button.primary,
+html[data-site] .update-banner button,
+html[data-site] .launch-link,
+[data-tool] .launch-link {
+  background: var(--brand-fill, var(--teal-dark));
+  color: #fff;
+}
+html[data-site] .btn:not(.secondary):hover,
+html[data-site] .btn:not(.secondary):focus-visible,
+html[data-site] button.primary:hover,
+html[data-site] .launch-link:hover,
+html[data-site] .launch-link:focus-visible,
+[data-tool] .launch-link:hover,
+[data-tool] .launch-link:focus-visible {
+  background: var(--brand-fill-hover, var(--navy));
+}
+html[data-site] .btn:hover,
+html[data-site] .btn:focus-visible,
+html[data-site] .launch-link:focus-visible,
+[data-tool] .launch-link:focus-visible {
+  outline-color: color-mix(in srgb, var(--teal) 32%, transparent);
+}
+html[data-site] .loop-scope-btn.active,
+html[data-site] .karaoke-word.active {
+  background: var(--brand-fill, var(--teal));
+  color: #fff;
+}
+
+/* Hover/selection washes that were hard-coded teal rgba(). */
+html[data-site] .chapter-check:hover,
+html[data-site] .verse-check:hover {
+  background: color-mix(in srgb, var(--teal) 10%, transparent);
+}
+html[data-site] .verse-picker {
+  background: color-mix(in srgb, var(--teal) 5%, transparent);
+}
+html[data-site] .karaoke-word.clickable:hover {
+  background: color-mix(in srgb, var(--teal) 16%, transparent);
+}

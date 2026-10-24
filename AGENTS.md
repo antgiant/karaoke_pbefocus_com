@@ -42,3 +42,14 @@ pushed to GitHub, `karaoke.pbefocus.com` DNS/CNAME live, GitHub Pages
 serving it), flip `karaoke`'s `live` to `true` in `pbefocus.com/site-nav.js`
 and redeploy that repo — otherwise this app stays invisible from the other
 two sites' navs indefinitely.
+
+## Branding (per-site accent)
+
+`assets/css/brand.css` is a **vendored copy** of `pbefocus.com/brand.css` -- do not edit it here. Change it in the
+`pbefocus.com` repo and run `node scripts/sync-brand.mjs` there to copy it into this repo. Both pages
+(`index.html`, `library-format.html`) set `<html data-site="karaoke">`, which makes the shared stylesheet use this
+site's leaf-green accent (the existing `--teal*` tokens are re-pointed, so most CSS needs no change). The header
+lockup (the site mark with "PBEfocus.com" above the site name, which replaces the shared PBEfocus.com logo),
+favicons and PWA icons come from `assets/site-mark*.svg`, `assets/favicon.svg`,
+`favicon.ico` and `assets/icon-*.png`. The service worker caches same-origin files as they load, so `brand.css`
+works offline without being listed anywhere. Status colors are deliberately not part of the accent.
