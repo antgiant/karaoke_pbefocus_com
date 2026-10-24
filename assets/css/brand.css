@@ -229,6 +229,21 @@ html[data-site] .karaoke-word.active {
   color: #fff;
 }
 
+/* Panel and card gradients were hard-coded to a teal wash (rgba(232,247,246)); follow the accent
+   instead. Light mode only: the dark surfaces are the shared neutral. */
+@media (prefers-color-scheme: light), (prefers-color-scheme: no-preference) {
+  html[data-site] {
+    --panel-bg: linear-gradient(180deg, rgba(255, 255, 252, 0.98),
+      color-mix(in srgb, var(--teal-wash) 96%, transparent));
+  }
+  html[data-site] .panel,
+  html[data-site] .feature-card:not(.resources-card),
+  [data-tool] .feature-card:not(.resources-card) {
+    background: var(--panel-bg, linear-gradient(180deg, rgba(255, 255, 252, 0.98),
+      color-mix(in srgb, var(--teal-wash) 96%, transparent)));
+  }
+}
+
 /* Hover/selection washes that were hard-coded teal rgba(). */
 html[data-site] .chapter-check:hover,
 html[data-site] .verse-check:hover {
