@@ -1,14 +1,18 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-site="karaoke">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="pbe-site" content="karaoke">
     <title>PBE Karaoke</title>
     <link rel="stylesheet" href="assets/css/styles.css" />
+    <link rel="stylesheet" href="assets/css/brand.css" />
     <link rel="manifest" href="manifest.json" />
-    <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
-    <meta name="theme-color" content="#0f6370" />
+    <link rel="icon" href="favicon.ico" sizes="48x48" />
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+    <meta name="theme-color" content="#4a7c10" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#071016" media="(prefers-color-scheme: dark)" />
     <script src="assets/vendor/msal-browser.min.js" defer></script>
     <script type="module" src="assets/js/main.js" defer></script>
     <script src="https://pbefocus.com/rogue-sheep.js" defer></script>
@@ -23,6 +27,13 @@
             <img src="assets/pbefocus-logo.png" alt="PBEfocus.com">
           </picture>
         </a>
+        <a class="site-badge" href="/" aria-label="PBE Karaoke home">
+          <picture>
+            <source srcset="assets/site-mark-dark.svg" media="(prefers-color-scheme: dark)">
+            <img src="assets/site-mark.svg" alt="" width="52" height="46">
+          </picture>
+          <span>Karaoke</span>
+        </a>
         <nav class="primary-nav" aria-label="Primary navigation">
           <span data-pbe-site-nav style="display:contents">
             <a href="https://pbefocus.com">Home</a>
@@ -34,6 +45,10 @@
 
     <main>
       <section class="mission-statement">
+        <picture>
+          <source srcset="assets/site-mark-dark.svg" media="(prefers-color-scheme: dark)">
+          <img class="mission-mark" src="assets/site-mark.svg" alt="" width="117" height="104">
+        </picture>
         <h1>PBE Karaoke</h1>
         <p>
           Pick your chapters and verses, choose the musical style for each part of the
