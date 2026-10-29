@@ -482,3 +482,137 @@ commentary text to this public repo (approved).
   choice in the preview step.
 - Still outstanding: the Python pipeline scripts and ~5 reference songs with
   their outputs (Phase 0 input).
+
+## 10. Remote sources: YouTube, Suno, other sites
+
+**The one fact that drives everything:** an embedded player (YouTube
+IFrame API, Suno/Spotify/SoundCloud/Vimeo embeds) lets us *control* playback
+but never *touch the audio*. It lives in a cross-origin iframe, so there is no
+Web Audio access, no download, and no samples to separate or align. Ripping or
+capturing that audio is also against YouTube's terms and a gray area for the
+others. So the pipeline can't be pointed at them. The design splits sources into
+two classes instead of pretending they're alike.
+
+### 10a. Two source classes
+
+| | **Owned audio** (files, Drive/OneDrive, direct URL with CORS) | **Remote player** (YouTube, Spotify, SoundCloud, Vimeo, Suno embed*) |
+|---|---|---|
+| Audio access | full (decode, separate, align, cache) | none |
+| Timing comes from | our aligner (§1d) | sidecar lookup, tap-sync, imported timed lyrics, or an aligned copy of the same song the user owns (§10c) |
+| Engine | today's `playback-engine.js` | new `RemotePlayer` adapter: `play/pause/seek/getTime/setRate/setVolume`, events |
+| Offline | yes | no |
+
+\* Suno: see §10d; its audio CDN may make it an *owned-audio* source.
+
+Add a **capability set** to every playback source
+(`{stems, pitch, reverb, vocalFade, mix, crossfade, offline, lockScreen,
+preciseSeek}`). The UI reads it and disables a control with a one-line reason
+("Not available for YouTube links") rather than silently doing nothing. A
+recording may hold *both* an embed reference and owned files; the engine
+prefers the files when present, so a link can be upgraded later.
+
+### 10b. What still works, what doesn't (remote player)
+
+- **Works:** karaoke highlight (follow `getCurrentTime()`, interpolated between
+  ~4 Hz polls with `performance.now()` and re-synced on drift > ~150 ms),
+  Karaoke Mode blanking, Type Ahead, Sing-Along (use headphones, since the mic
+  would otherwise hear the embed), Name that Passage, playlists, verse
+  navigation and A/B verse loops (seek-based, so loop edges are looser, about
+  +/-0.3 s), playback-rate control where the platform offers it, volume fade for
+  the Sleep Mode timer where the platform allows it (not iOS).
+- **Doesn't:** stems and vocal fade-out, pitch/key-lock/reverb, mastering
+  limiter, gapless crossfades, lock-screen controls, offline use, and **genre-mix
+  splicing across recordings** (it needs sample-accurate scheduling of two
+  streams). A best-effort "switch embeds at verse boundaries" mode is possible
+  with a visible gap and risk of ads; treat it as out of scope for v1 and say
+  so in the UI.
+- **Sharing is better, not worse:** a shared playlist holds only IDs plus
+  timing sidecars, so it never distributes audio.
+- **Embed rules shape the layout:** YouTube requires a visible player of
+  reasonable minimum size and doesn't allow hiding it for audio-only playback.
+  (I'm going from memory of their developer policy; verify before building.)
+  The lyric display must leave room for the video, not cover it. Mobile
+  browsers also need a user tap to start an embed, and pause it when the tab
+  is backgrounded, so Sleep Mode degrades to "screen on, video visible".
+- **Ads/unavailable videos:** pre-roll shifts nothing if we only start the
+  clock on the player's `PLAYING` state, but a mid-roll or an
+  embedding-disabled/removed video interrupts. Detect `onError`/state changes,
+  pause the highlight, and show "video unavailable" with the sidecar kept.
+
+### 10c. Where do word timings come from?
+
+This is the biggest operational change: no audio means no STT. In order of
+preference:
+1. **Existing sidecar** for the same `(platform, videoId)`, found in the
+   library folder or shared drive (`<name>.pbek.link.json` plus the usual
+   words sidecar). One person syncs a song; everyone with the library gets it.
+   (A future shared index could let users find each other's timing; not v1.)
+2. **Bind to an owned copy:** the user drops their own legal audio file for the
+   same song; we align it with the normal pipeline (§1d), then a one-step
+   **offset calibration** (play the embed, tap when a known word is sung)
+   maps that timing onto the video's clock (`timingOffset`; optional
+   `timeScale` for a different-speed upload).
+3. **Tap-to-sync editor:** the reference text is already known, so the user
+   only supplies *when*. Tap at each verse/line while the embed plays; word
+   times inside a line are interpolated by syllable weight, then refined with
+   nudge controls. Coarser than STT but plenty for karaoke highlighting, and
+   it works for any embed. Reuses the review editor from §3.
+4. **Import** timed lyrics (LRC or our JSON).
+5. *Not planned:* capturing tab audio (`getDisplayMedia`) to feed the aligner.
+   It would technically work in Chromium in real time, but it processes
+   audio the platform doesn't allow us to extract. Left as an explicit
+   decision for you, not a default.
+
+A sidecar is bound to the video via `{provider, id, durationSec}`; if the
+embed's reported duration later differs (a re-upload, a different cut), warn
+before applying old timing.
+
+### 10d. Suno specifically (needs a test, can't verify from here)
+
+- Suno song pages/embeds are an iframe, so treat them as a remote player
+  *unless* the embed exposes no usable time/seek API, in which case timing
+  can't follow playback at all. I don't know of a public player API for them;
+  Phase 0 checks.
+- Their audio is served from a public CDN URL pattern (the existing
+  pipeline's originals came from there). If that CDN allows cross-origin
+  reads (CORS), a Suno link becomes a **direct-URL, owned-audio** source and
+  the *full* pipeline (stems included) applies; if it doesn't, a plain
+  `<audio>` can still play it but Web Audio can't touch it. I also recall
+  Suno exposing word-timed lyrics to signed-in users, but it's an
+  undocumented, authenticated API and not something to build on without
+  checking terms. Confirm the account tier's usage rights before processing
+  anyone's Suno audio.
+
+### 10e. "Other sites"
+
+A pasted URL is classified in order: (1) **direct audio URL** (mp3/m4a/ogg;
+a CORS-readable one is a full owned-audio source via a read-only `URL`
+provider and gets cached like any other file; a non-CORS one is
+playback-only); (2) **known embed provider** with a player API
+(YouTube, SoundCloud Widget, Vimeo, Spotify), handled by a per-provider
+`RemotePlayer` adapter that implements the same small interface; (3) anything
+else: save as a reference link only ("can't play this site inside the app").
+There is no CORS-proxy fallback; the app has no server and a proxy would
+also be a rights problem. Spotify's embed generally plays short previews
+unless the viewer is a signed-in Premium user, so label it "preview only".
+
+### 10f. Changes to earlier sections
+
+- **Manifest/sidecar:** a recording's audio fields become optional; add
+  `source: {kind: "file"|"url"|"embed", provider, id, durationSec,
+  startOffset, endOffset, timingOffset}` and `capabilities`. Timing sidecars
+  carry how they were produced (`aligned | tapped | imported`).
+- **Queue (§3):** a remote item skips separate/encode; its "align" stage
+  becomes a **Needs timing** state with the choices in §10c, and its tier tops
+  out at T1 (lyrics) unless an owned copy is added later.
+- **Add songs (§5):** a "Paste a link" tab beside file/folder: detects the
+  provider, shows title/thumbnail (oEmbed where CORS allows, else the bare ID),
+  asks passage + Words chip, then asks how to get timing.
+- **Caching (§4):** nothing to cache for audio. Cache timing sidecars and
+  link metadata aggressively, and remember "unavailable" results.
+- **Phases:** add **Phase 2b, remote sources**, right after Phase 2: capability
+  flags, `RemotePlayer` interface and a fake for Node tests, YouTube adapter,
+  link recording + tap-sync editor. Then direct-URL (cheap), then Suno/other
+  providers after the Phase 0 findings. Phase 0 gains: (i) YouTube clock
+  accuracy and loop-edge error on real devices, (ii) Suno embed API and CDN
+  CORS behavior, (iii) which of SoundCloud/Vimeo/Spotify are worth adapters.
