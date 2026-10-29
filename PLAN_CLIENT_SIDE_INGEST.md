@@ -406,6 +406,12 @@ Layered, content-addressed, stale-while-revalidate:
 
 ## 7. Phases (each independently shippable)
 
+> **Priority shift (see §10-§11):** embeds (YouTube/Suno playlists) are now the
+> *primary* use case and uploaded personal files the *secondary* one, so the
+> shared data model, `RemotePlayer`/YouTube, tap-sync, and collaboration come
+> **before** the heavy ML path (stems, STT, WebGPU). The phase list below keeps
+> its content, but the authoritative order is **§11f**.
+
 - **Phase 0, spike (blocks the rest):** with ~5 songs from your existing
   library plus their Python outputs as ground truth, measure in a throwaway
   page: (a) forced CTC vs. Whisper word-timing error against the
@@ -616,3 +622,136 @@ unless the viewer is a signed-in Premium user, so label it "preview only".
   providers after the Phase 0 findings. Phase 0 gains: (i) YouTube clock
   accuracy and loop-edge error on real devices, (ii) Suno embed API and CDN
   CORS behavior, (iii) which of SoundCloud/Vimeo/Spotify are worth adapters.
+
+## 11. Collaborative space: shared playlists, shared timings, votes
+
+### 11a. Is it possible with this architecture?
+
+**Not with karaoke's current one** (no identity, no write path, no merging),
+**but the architecture of `score_pbefocus_com` is the right foundation, so adopt
+it.** From reading its code and docs (`AGENTS.md` "Cloud Folder Sync
+Architecture", `SYNC_SETUP.md`):
+- Data lives in **Yjs CRDT documents**, IndexedDB-first, so editing works
+  offline and merges without conflicts.
+- Sharing is a **cloud folder** (Google Drive or OneDrive) that members open
+  with their own account. **Each device writes only its own files**
+  (`c-{clientId}.yjs`, optional `snapshot-*.yjs`) and merges everyone else's;
+  nothing is deleted. No server of ours.
+- It already solved the hard parts I'd flagged: Drive via **`drive.file` +
+  Google Picker (with `appId`) for a shared folder**, OneDrive via MSAL
+  `Files.ReadWrite.AppFolder` / `.All`, adaptive polling with backoff, "large
+  event" relay beyond ~20 writers, status/reconnect UX, and a `FolderBackend`
+  interface (`list/get/put`) with a mock for tests. It also ships PWA file/link
+  handlers and shares OAuth registrations across pbefocus.com apps.
+- Caveat: its sign-in/real-folder flows are marked as needing manual testing with
+  real client IDs, so Phase 0 should still run a two-account shared-folder test.
+
+### 11b. Three spaces, one data model
+
+| Space | Who | Where it lives | Server? |
+|---|---|---|---|
+| **Personal** | you | IndexedDB / your Drive / OneDrive / local folder | none |
+| **Club** | a team that shares a folder | shared cloud folder, Yjs, `score`-style | none |
+| **Community catalog** | all pathfinders | read-mostly published data, and (optionally) votes | static files, or a thin service (§11d) |
+
+The same record types work in all three, behind a `SpaceProvider` interface
+(like `fs/` providers): `FolderSpace` (score engine), `CatalogSpace` (static
+JSON, like the quiz's `questions/v1/` files), and later `ServiceSpace`.
+
+**Records** (all small JSON; audio is never stored):
+- `song`: `{provider, id, durationSec, passageRef | commentaryRef, wordsMode}`
+- `timingSet`: **immutable, content-addressed** (`sha256` of its canonical JSON):
+  `{song, textVersion, wordTimes[], method: tapped|aligned|imported, parent?,
+  author: pseudonymousId, createdAt}`. "Improving" a timing = publishing a
+  *child* set, not editing in place. Immutable versions merge trivially in any
+  storage (a file per hash), keep full history, and make forks and rollbacks
+  free.
+- `vote`: `{timingSetHash, voter, value, note?: early|late|good}`, last-write-wins
+  per `(voter, set)`.
+- `playlist`: ordered items `{song, chosenTimingSet?}` plus the existing
+  genre-mix/style settings where they still apply (§10b).
+
+### 11c. How "quality" is decided
+
+- **Rank sets** per song by an adjustable score (net votes, recency, and
+  whether the author is a trusted validator), and play the top one by default
+  with a "Timing: ★ 4.6 (12) · other versions" control, so a newcomer needs no
+  decisions.
+- **Cheap, low-effort feedback:** after a play-through, "timing felt: early /
+  good / late". Early/late votes also yield a **consensus offset** (median) that
+  is applied to a set without anyone re-tapping it.
+- **Improve:** open a set in the tap-sync editor, fix the bad verse, save as a
+  child version; the diff vs. the parent is shown, and votes then decide which
+  wins. Live co-editing of one set is unnecessary, so avoid it.
+- **Validators:** like the quiz's `validatedBy`, maintainers or club leaders can
+  mark a set as verified; that outranks vote count.
+- **Bridge from owned audio:** any member who has the audio can run the aligner
+  (§1d) and publish the *timing* (never the audio), tagged `aligned`. That
+  gives the community high-quality timings with no tapping.
+
+### 11d. Where voting needs a server (the real decision)
+
+A shared Drive folder is a **trusted-group** model: anyone who can open it can
+read and write; votes are honest-by-assumption. That's fine for a club (tens of
+people) and wrong for the whole community (thousands, strangers, no way to
+stop ballot-stuffing, folder-share friction, Drive quotas). Options:
+
+1. **Club-only voting + maintainer-curated catalog (no server).** Clubs vote
+   inside their own folder; maintainers/validators promote good sets into the
+   public catalog (static JSON in `pbefocus.com` or this repo). Cheapest, safest,
+   no new infrastructure. Cross-club ranking is manual.
+2. **Thin service for the commons.** One tiny hosted service (e.g. Cloudflare
+   Workers + D1/KV, or Supabase) that verifies the user's Google/Microsoft ID
+   token, stores pseudonymous `timingSet`/`vote` records, rate-limits, and
+   serves rankings as cached JSON. Everything else stays client-side. Gives
+   true global voting but adds hosting, cost, abuse handling, and ends the
+   "nothing is sent to our servers" posture the score app advertises.
+3. **GitHub PRs as the backend.** Contributors open PRs against a data repo.
+   Strong review and history but a poor fit: needs GitHub accounts and is
+   far too heavy for children.
+
+**Rec.:** ship (1) first, but build behind `SpaceProvider` so (2) can be added
+later without touching the app. Decide on (2) only if clubs ask for
+cross-club voting.
+
+### 11e. Safeguards (Pathfinders are minors)
+
+- **No free text, photos, or real names** in shared data. Members appear as
+  club-chosen nicknames or a random pseudonym; the score app currently records
+  the account's real name for folder members, so don't copy that for community
+  data, and say who can see what in the UI.
+- **Playlists are private by default** and shared explicitly (link/QR as today,
+  or into a club folder).
+- **Moderation:** a "report this timing" action; club leaders or validators can
+  hide a set (a `hidden` marker record, never a delete). With a service (option
+  2), add rate limits and a takedown path.
+- **Rights:** shared data is song *references* (IDs), timings, and scripture/
+  commentary word lists. It never contains audio or someone else's lyrics beyond
+  the commentary text already approved for this repo.
+- Clubs on school/church Google or Microsoft tenants may block third-party
+  OAuth or need admin consent (score's `SYNC_SETUP.md` notes this for `.All`),
+  so keep **share-link import** (no sign-in) as the lowest-friction path.
+
+### 11f. Revised phases (authoritative order)
+
+0. **Spikes:** YouTube clock/loop accuracy; tap-sync quality (can a first-time
+   user produce a good verse-level sync in a few minutes?); Suno embed/CDN (§10d);
+   two-account Drive and OneDrive shared-folder test using score's code; NKJV
+   file/OCR/commentary checks from earlier; the pipeline scripts and reference
+   songs still needed *only* for the secondary ML path.
+1. **Data model + `RemotePlayer` + YouTube adapter + capability flags** (§10),
+   in karaoke's existing engine, with a fake player for Node tests.
+2. **Tap-sync editor**, `timingSet` records, personal-space storage
+   (IndexedDB), and the Paste-a-link flow. First usable milestone: a user can
+   build a YouTube playlist with synced lyrics entirely by themselves.
+3. **Share links** for playlists + timing sets (extends `share.js`), still
+   serverless; shared bible store (§1c-bis).
+4. **Club spaces:** port/vendor the `score` folder-sync engine, providers, and
+   auth (or extract a shared package used by both apps); votes, versions,
+   "improve", validators, report/hide.
+5. **Community catalog** (static, maintainer-curated) and consensus-offset
+   votes; then **decide on the thin service** (§11d option 2).
+6. **Personal audio path (original Phases 1-6):** provider/cache layer,
+   alignment, stems, queue UI, cloud writes, PWA hardening. Aligned timings can
+   now be *published* into the shared space.
+7. Suno/SoundCloud/Vimeo/Spotify adapters as Phase 0 justifies.
