@@ -712,7 +712,9 @@ stop ballot-stuffing, folder-share friction, Drive quotas). Options:
 
 **Rec.:** ship (1) first, but build behind `SpaceProvider` so (2) can be added
 later without touching the app. Decide on (2) only if clubs ask for
-cross-club voting.
+cross-club voting. **§11g works out option (1) in detail, with GitHub Pages as
+the only infrastructure and GitHub's own Issues/Actions as the moderation and
+build pipeline.**
 
 ### 11e. Safeguards (Pathfinders are minors)
 
@@ -749,9 +751,119 @@ cross-club voting.
 4. **Club spaces:** port/vendor the `score` folder-sync engine, providers, and
    auth (or extract a shared package used by both apps); votes, versions,
    "improve", validators, report/hide.
-5. **Community catalog** (static, maintainer-curated) and consensus-offset
-   votes; then **decide on the thin service** (§11d option 2).
+5. **Community catalog** per §11g: static catalog + read path, submission
+   issue template, validation/agreement Action, leader review queue and signed
+   approvals, `hidden.json`, then optional club tallies. Revisit a thin service
+   (§11d option 2) only if this proves insufficient.
 6. **Personal audio path (original Phases 1-6):** provider/cache layer,
    alignment, stems, queue UI, cloud writes, PWA hardening. Aligned timings can
    now be *published* into the shared space.
 7. Suno/SoundCloud/Vimeo/Spotify adapters as Phase 0 justifies.
+
+### 11g. Serverless community catalog (GitHub Pages + GitHub Actions only)
+
+**Verdict.** Possible, with one honest limit: *uncheatable one-person-one-vote
+across strangers is impossible without an authority that checks identities*.
+So don't build open voting. Replace it with things a static site *can* do:
+curation, agreement between independent submissions, organization-level trust,
+and mechanical validation. Quality stakes are low (a timing set is just
+numbers), which is what makes this workable.
+
+**What "no server" means here.** GitHub Pages serves the catalog. GitHub
+Issues receive submissions, and GitHub Actions (free for public repos)
+validates them and rebuilds the catalog. Those are GitHub features, not
+servers we run; if you'd rather exclude Actions too, the fallback is a human
+doing the same steps by hand (slower, same design).
+
+#### Read path
+A static catalog in the repo (served like the quiz's `questions/v1/`):
+`catalog/v1/index.json` (chunked per book/year), `songs/<provider>/<id>.json`
+(ranked list of set hashes + `best`), and immutable `sets/<hash>.json`. Every
+file is small; sets are immutable, so they cache forever; the app also
+caches the index (§4 style, plus the shared store of §1c-bis). Audio is never
+here, so repo and Pages size/bandwidth limits aren't a concern.
+
+#### Submit path (no accounts needed for kids)
+1. **Club path (primary).** A Pathfinder taps along, saves the set into their
+   *club space* (§11b) or just exports it as a small file/link and hands it to
+   their leader. A **club leader** (adult, registered once; see trust ladder)
+   sees a **Review queue** in the app, previews the set, and approves or rejects
+   it. Nothing here needs a GitHub account for the Pathfinder.
+2. **Promote.** The leader's app produces a **pre-filled GitHub issue link**
+   (`/issues/new?template=timing-submission&body=<compressed set>`); a delta-
+   encoded set for a chapter is a few hundred bytes of base64, well under URL
+   limits. The leader (or any adult with a GitHub account) clicks Submit.
+   GitHub Pages cannot accept a POST, which is why the submission rides on a
+   GitHub issue instead.
+3. **Bot.** An Action triggered by the issue treats the body as *data only*
+   (strict JSON schema; never executed or interpolated into shell), runs the
+   checks below, then opens a PR or auto-merges per policy and comments the
+   result on the issue.
+4. Fallbacks for people with no GitHub at all: leader forwards the exported
+   file to a maintainer; or a Google Form "inbox" that the app can post to
+   fire-and-forget (a third-party service, not ours, so it's your call whether
+   that fits "no servers").
+
+#### Mechanical moderation (does most of the work)
+- **Constrain the data so there's little to moderate:** a set is numbers and
+  enums only: no names, no free text, no images. Playlist titles/descriptions
+  are the only free text in the app, so **public playlists don't exist**;
+  playlists are shared by link or inside a club, and maintainers may publish a
+  curated "featured" list.
+- **Validation bot:** schema and size caps; times monotonic and within the
+  video's duration; every reference word present; sane word durations; the
+  embed is actually embeddable (oEmbed check) and its title/author don't trip a
+  keyword blocklist; per-submitter and per-IP-agnostic rate limits via issue
+  counts per `authorId`; duplicate detection.
+- **Agreement instead of votes:** compare a new set with existing sets for the
+  same song. If it lands within tolerance of independent submissions it gains
+  "corroborated by N"; outliers are flagged. The consensus (median) set is a
+  strong, hard-to-fake quality signal that needs no ballots, and it lets
+  "improve" submissions win only if they're close to what independent people
+  agree on or are approved by someone trusted.
+- **Pre-moderation:** nothing is public until merged, so there's no live
+  abuse window. Everything is a PR with history, so any change is reversible
+  with a revert.
+- **Takedowns/hide:** a `hidden.json` tombstone list (set hash, video id, or
+  author) the build honors; instant for a maintainer, auditable, and nothing is
+  destroyed. A "Report" button in the app produces a prefilled issue for
+  adults, and tells Pathfinders to tell their leader.
+
+#### Trust ladder (who can approve what)
+| Level | Who | Power |
+|---|---|---|
+| Pathfinder | anyone | creates sets; sees top-ranked and club versions |
+| Club leader | registered adult (`trusted-leaders.json`, added by PR once) | approves members' sets; leader-approved sets skip manual review if they pass the bot |
+| Validator | area/conference volunteer | can mark sets verified and resolve disputes |
+| Maintainer | you | merges policy changes, hides, rolls back |
+
+A leader's approval is a **signed record** (WebCrypto ECDSA keypair in their
+browser; public key listed in `trusted-leaders.json`), so the bot can verify it
+came from them without the leader touching GitHub beyond the one submit click.
+Optional: authors who've had N sets accepted earn auto-approve.
+
+#### "Votes," redone for a static world
+- **Personal ratings and early/late feedback** are stored in your personal or
+  club space and drive *your own* ordering instantly.
+- **Club tallies are an input, not the verdict:** a club may publish a small
+  static feed of its aggregated ratings; the nightly Action reads registered
+  clubs' feeds (listed in `clubs.json`) and counts each *club* as at most one
+  voice per set, so one club can't stuff the ballot. Weighted below approvals
+  and agreement. (Skip this in v1 if it's more than clubs want.)
+- **Ranking order:** verified > leader-approved > corroborated > newest. Early/
+  late feedback adjusts a set's **consensus offset** (median across clubs)
+  without a new version.
+
+#### What you give up (and mitigations)
+- **Not real-time:** a promoted set appears after the next Action run
+  (minutes) and review (hours to days). *Mitigation:* your own and your club's
+  sets are live immediately through the personal/club overlay.
+- **No global live leaderboard or per-person vote integrity.** Accepted.
+- **Adults are the publishing gateway.** Deliberate: it's also the safeguarding
+  story for minors.
+- **Spam can still clog the issue tracker.** Template-only issues, a bot that
+  auto-closes invalid ones, and rate limiting per `authorId`.
+- **Reviewer load.** The validation bot, leader auto-approval, and agreement
+  checks should leave humans only the disputed cases.
+- **Escape hatch:** if a thin service is ever wanted, this design plugs it in
+  behind `SpaceProvider` without changing the data model.
