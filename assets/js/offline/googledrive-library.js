@@ -24,13 +24,14 @@
 import { CACHE_KIND, cacheKeyedUrl, fetchCachedJson, resolveUrlSync as audioResolveUrlSync } from "./audio-cache.js";
 import { saveManifest, loadManifest } from "./manifest-cache.js";
 
-// Restricted (HTTP referrer + Drive API only) in Google Cloud Console --
+// The shared pbefocus.com family key, restricted (HTTP referrer + Drive API only)
+// in Google Cloud Console --
 // see PBE_2026_2027/AGENTS.md's "One-time Google Cloud setup". The
 // referrer restriction is what keeps this safe to ship in client code
 // despite being public -- it only works from the real site's origin, not
 // localhost (Google doesn't allow that as a referrer restriction), so
 // local dev against this source needs the deployed site itself.
-const GOOGLE_API_KEY = "AIzaSyCasE-WU2AWhkJKZUXknzrzjaEFfAaqxhQ";
+const GOOGLE_API_KEY = "AIzaSyAXzux3Lbfd_fHp2efZTH7E-m5EKLZCxdg";
 const DRIVE_API_BASE = "https://www.googleapis.com/drive/v3";
 const FOLDER_MIME = "application/vnd.google-apps.folder";
 const MANIFEST_FILENAME = "manifest.local.json";
