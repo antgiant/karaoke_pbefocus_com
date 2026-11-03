@@ -3,7 +3,7 @@
 // .github/workflows/stamp-version.yml on every push to main -- never edit by
 // hand. "dev" in the footer therefore means a local checkout, or a deploy the
 // workflow hasn't stamped yet.
-export const APP_VERSION = "2026.11.03-8d78e5d";
+export const APP_VERSION = "2026.11.03-fc24429";
 
 const el = document.getElementById("appVersion");
 if (el) {
