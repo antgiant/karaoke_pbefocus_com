@@ -31,7 +31,11 @@ import { saveManifest, loadManifest } from "./manifest-cache.js";
 // despite being public -- it only works from the real site's origin, not
 // localhost (Google doesn't allow that as a referrer restriction), so
 // local dev against this source needs the deployed site itself.
-const GOOGLE_API_KEY = "AIzaSyAXzux3Lbfd_fHp2efZTH7E-m5EKLZCxdg";
+// This is the family project's Drive-API-only key. The family project has a
+// separate Picker-only key (AIzaSyAXzux3Lbfd_fHp2efZTH7E-m5EKLZCxdg) for the
+// future shared-folder Picker/sign-in work -- not used here; a key restricted
+// to one API is rejected by the other.
+const GOOGLE_API_KEY = "AIzaSyDqW03arYkg-8uB1IKSD6NIw5wm-eR9RYk";
 const DRIVE_API_BASE = "https://www.googleapis.com/drive/v3";
 const FOLDER_MIME = "application/vnd.google-apps.folder";
 const MANIFEST_FILENAME = "manifest.local.json";
