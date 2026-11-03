@@ -1356,6 +1356,13 @@ body.sleep-mode-active {
   margin: 0;
 }
 
+.site-footer .app-version {
+  margin-left: 0.5rem;
+  font-size: 0.8em;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --ink: #a0d8ef;

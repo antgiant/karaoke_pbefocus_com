@@ -53,3 +53,9 @@ lockup (the site mark with "PBEfocus.com" above the site name, which replaces th
 favicons and PWA icons come from `assets/site-mark*.svg`, `assets/favicon.svg`,
 `favicon.ico` and `assets/icon-*.png`. The service worker caches same-origin files as they load, so `brand.css`
 works offline without being listed anywhere. Status colors are deliberately not part of the accent.
+
+## Version number
+
+The footer shows `APP_VERSION` from `assets/js/version.js` (`YYYY.MM.DD.N`).
+Bump it in every change that ships to `main`, so the footer always identifies
+which build a deployed page is actually running.
