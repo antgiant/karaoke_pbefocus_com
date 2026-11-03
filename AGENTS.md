@@ -56,6 +56,8 @@ works offline without being listed anywhere. Status colors are deliberately not 
 
 ## Version number
 
-The footer shows `APP_VERSION` from `assets/js/version.js` (`YYYY.MM.DD.N`).
-Bump it in every change that ships to `main`, so the footer always identifies
-which build a deployed page is actually running.
+The footer shows `APP_VERSION` from `assets/js/version.js`. Don't edit it: the
+`Stamp version` workflow (`.github/workflows/stamp-version.yml`) rewrites it as
+`YYYY.MM.DD-<sha>` in a follow-up commit on every push to `main`, so the footer
+identifies the exact build a deployed page is running. Pull before your next push
+to `main`, since the bot adds a commit after yours. The repo copy reads `dev`.

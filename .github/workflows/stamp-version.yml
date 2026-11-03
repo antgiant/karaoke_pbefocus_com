@@ -1,0 +1,31 @@
+# Stamps assets/js/version.js with the build date and the short SHA of the
+# commit that was just pushed, so the footer version never needs hand-updating.
+# GitHub Pages then deploys the stamp commit. The stamp is committed by
+# GITHUB_TOKEN, which GitHub does not use to trigger further workflow runs,
+# so this can't loop; the actor check is a second guard.
+name: Stamp version
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  stamp:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Write version.js
+        run: |
+          VERSION="$(date -u +%Y.%m.%d)-$(echo "$GITHUB_SHA" | cut -c1-7)"
+          sed -i "s|^export const APP_VERSION = .*|export const APP_VERSION = \"${VERSION}\";|" assets/js/version.js
+      - name: Commit stamp
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/js/version.js
+          git diff --cached --quiet || git commit -m "Stamp version [skip ci]"
+          git push

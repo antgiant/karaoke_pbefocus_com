@@ -1,8 +1,12 @@
-// The one place the deployed version lives -- bump it with every change that
-// ships, so the footer (below) tells a Pathfinder (or a maintainer checking a
-// fresh deploy) exactly which build they're on. Format: YYYY.MM.DD.N, where N
-// counts that day's releases starting at 1.
-export const APP_VERSION = "2026.11.03.1";
+// The deployed version shown in the footer. It reads "dev" in the repo and
+// is stamped automatically (build date + short SHA of the pushed commit) by
+// .github/workflows/stamp-version.yml on every push to main -- never edit by
+// hand. "dev" in the footer therefore means a local checkout, or a deploy the
+// workflow hasn't stamped yet.
+export const APP_VERSION = "dev";
 
 const el = document.getElementById("appVersion");
-if (el) el.textContent = `v${APP_VERSION}`;
+if (el) {
+  el.textContent = APP_VERSION === "dev" ? "dev build" : `v${APP_VERSION}`;
+  if (document.lastModified) el.title = `App version. Page last modified: ${document.lastModified}`;
+}
